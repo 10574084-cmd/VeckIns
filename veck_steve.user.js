@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      1.7
+// @version      1.8
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -78,6 +78,10 @@
     if (Math.abs(D(r0, r1)) > 0.02 * l0 * l1 || Math.abs(D(r0, r3)) > 0.02 * l0 || Math.abs(D(r1, r3)) > 0.02 * l1) return false;
     return Math.abs(m[15]) < 1e4 && !(m[15] === 0 && m[3] === 0 && m[7] === 0 && m[11] === 0);
   };
+  // viewmodel del juego (arma + mano): se identifica cada dibujo por programa|textura|cantidad para poder esconder solo la mano
+  const VMS = { w: false, prog: 0, tex: 0, ids: new WeakMap(), n: 0, cur: [], curSet: new Set(), list: [], pi: -1, hand: new Set(), probe: null };
+  try { JSON.parse(localStorage.getItem('vs_hand') || '[]').forEach((x) => VMS.hand.add(x)); } catch (e) {}
+  const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
   const MN = { vp: new Map(), VPc: null, vpf: -9, cands: [], pick: 0, hist: new Map(), seq: 0, evP: [], evR: [], P: null, V: null, pf: -9, vf: -9, nUm: 0, nUbo: 0, nP: 0, nR: 0, ctx2: false };
   const transp = (m) => { const o = new Float32Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c]; return o; };
   const MU = { vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
@@ -107,6 +111,7 @@
   };
   const mkey = (m) => Array.from(m, (v) => Math.round(v * 1e3)).join(',');
   const mnFrameEnd = () => {
+    if (VMS.cur.length) { VMS.list = VMS.cur; VMS.cur = []; VMS.curSet = new Set(); }
     { const arr = []; MU.vp.forEach((e) => arr.push(e)); arr.sort((a, b) => b.n - a.n); MU.vp.clear();
       if (arr.length) { MU.cands = arr.slice(0, 12); const e = MU.cands[MN.pick % MU.cands.length]; MU.chosen = e.m; MU.f = S.frame; } }
     // la vista es la matriz rigida que el juego sube justo al lado de la proyeccion (mismo momento, mismo cuadro)
@@ -156,11 +161,12 @@
     const P = C.prototype;
     const gul = P.getUniformLocation; if (gul) P.getUniformLocation = function (pr, name) { const l = gul.call(this, pr, name); if (l && !mine(this)) { try { locName.set(l, String(name)); } catch (e) {} } return l; };
     // contador de llamadas por funcion + busqueda de matrices en CUALQUIER subida de numeros (uniform*v, buffers)
-    ['uniform1fv', 'uniform2fv', 'uniform3fv', 'uniform4fv', 'uniformMatrix2fv', 'uniformMatrix3fv', 'uniformMatrix4fv', 'bufferData', 'bufferSubData', 'drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'bindBufferBase', 'bindBufferRange', 'uniformBlockBinding', 'getUniformBlockIndex', 'texImage2D', 'texSubImage2D', 'createVertexArray', 'getUniformLocation', 'useProgram'].forEach((fn) => {
+    ['uniform1fv', 'uniform2fv', 'uniform3fv', 'uniform4fv', 'uniformMatrix2fv', 'uniformMatrix3fv', 'uniformMatrix4fv', 'bufferData', 'bufferSubData', 'drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'bindBufferBase', 'bindBufferRange', 'uniformBlockBinding', 'getUniformBlockIndex', 'texImage2D', 'texSubImage2D', 'createVertexArray', 'getUniformLocation', 'useProgram', 'bindTexture'].forEach((fn) => {
       const o = P[fn]; if (!o || o.__vsw) return;
       const w = function () {
         if (!mine(this)) {
           EV.calls[fn] = (EV.calls[fn] || 0) + 1;
+          if (fn === 'useProgram') VMS.prog = vid(arguments[0]); else if (fn === 'bindTexture' && arguments[0] === 0x0DE1) VMS.tex = vid(arguments[1]);
           if (/^uniform[1-4]fv$/.test(fn)) { const v = arguments[1]; if (v && v.length >= 16 && v.length <= 4096 && S.dc <= 1) { nameFeed(locName.get(arguments[0]), v); MN.nUm++; MN.seq++; if (SMP.raw.length < 10 && v.length >= 16 && (S.frame % 7 === 0)) { const nm = locName.get(arguments[0]) || '?'; if (!SMP.raw.some((e) => e.n === nm)) SMP.raw.push({ n: nm, len: v.length, v: Array.from(v.slice(0, 16), (x) => +x.toFixed(3)) }); } for (let i = 0; i + 16 <= v.length; i += 4) feed(copy16(v.subarray ? v.subarray(i, i + 16) : v.slice(i, i + 16))); } }
         }
         return o.apply(this, arguments);
@@ -188,7 +194,14 @@
     // mientras estas en modo bloques se salta el dibujo del arma (todo lo que se dibuja despues del segundo borrado de profundidad)
     ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements'].forEach((fn) => {
       const o = P[fn]; if (!o) return;
-      P[fn] = function () { if (S.on && cfg.hideGun && S.dc >= 2 && !mine(this)) return; return o.apply(this, arguments); };
+      P[fn] = function () {
+        if (S.on && S.dc >= 2 && !mine(this)) {
+          const a = arguments, sig = VMS.prog + '|' + VMS.tex + '|' + (fn.indexOf('Elements') >= 0 ? a[1] : a[2]);
+          if (!VMS.curSet.has(sig)) { VMS.curSet.add(sig); VMS.cur.push(sig); }
+          if (!VMS.w || VMS.hand.has(sig) || VMS.probe === sig) return;          // modo bloques: todo oculto. Modo armas: solo la mano
+        }
+        return o.apply(this, arguments);
+      };
     });
   };
   if (window.WebGLRenderingContext) hookGL(window.WebGLRenderingContext);
@@ -254,7 +267,6 @@
   // ------------------------------------------------------------------ entrada
   const K = {};
   const mouse = { dx: 0, dy: 0 };
-  let wmode = false, wSel = 0;                                               // wmode: la barra muestra armas (tecla 0) en vez de bloques
   let selSlot = 0, lmb = false, swing = -1, swingT = 0;
   const lockOn = () => !!document.pointerLockElement;
   window.addEventListener('keydown', (e) => {
@@ -269,10 +281,16 @@
     else if (S.on && e.code === 'BracketRight') { cfg.scale = Math.min(50, +(cfg.scale * 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
-    else if (S.on && lockOn() && e.code === 'Digit0') { wmode = !wmode; refreshHud(); toast(wmode ? 'Armas: pulsa 1-9 para elegir (0 vuelve a los bloques)' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
-    else if (S.on && lockOn() && /^Digit[1-9]$/.test(e.code)) { const n = +e.code.slice(5) - 1; if (wmode) wSel = n; else selSlot = n; refreshHud(); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && e.code === 'Digit0') { VMS.w = !VMS.w; VMS.probe = null; refreshHud(); toast(VMS.w ? 'Armas de Veck.io (0 vuelve a los bloques). Si ves la mano del juego: , y . la buscan, / la deja oculta' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && VMS.w && (e.code === 'Comma' || e.code === 'Period' || e.code === 'Slash')) {
+      const L = VMS.list; e.preventDefault(); e.stopImmediatePropagation();
+      if (!L.length) { toast('No veo partes del arma todavia'); }
+      else if (e.code === 'Slash') { const sg = L[VMS.pi]; if (sg == null) toast('Primero busca con , y .'); else { if (VMS.hand.has(sg)) VMS.hand.delete(sg); else VMS.hand.add(sg); try { localStorage.setItem('vs_hand', JSON.stringify([...VMS.hand])); } catch (er) {} toast(VMS.hand.has(sg) ? 'Parte ' + (VMS.pi + 1) + ' oculta para siempre' : 'Parte ' + (VMS.pi + 1) + ' visible otra vez'); } }
+      else { VMS.pi = ((VMS.pi < 0 ? (e.code === 'Period' ? -1 : 0) : VMS.pi) + (e.code === 'Period' ? 1 : -1) + L.length) % L.length; VMS.probe = L[VMS.pi]; toast('Parte ' + (VMS.pi + 1) + ' de ' + L.length + ' escondida ahora' + (VMS.hand.has(L[VMS.pi]) ? ' (ya es mano)' : '') + ': si era la mano pulsa /'); }
+    }
+    else if (S.on && lockOn() && !VMS.w && /^Digit[1-9]$/.test(e.code)) { selSlot = +e.code.slice(5) - 1; refreshHud(); e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
-  window.addEventListener('keyup', (e) => { K[e.code] = false; if (S.on && lockOn() && /^Digit[0-9]$/.test(e.code)) e.stopImmediatePropagation(); }, true);
+  window.addEventListener('keyup', (e) => { K[e.code] = false; if (S.on && lockOn() && (e.code === 'Digit0' || (!VMS.w && /^Digit[1-9]$/.test(e.code)))) e.stopImmediatePropagation(); }, true);
   window.addEventListener('blur', () => { for (const k in K) K[k] = false; lmb = false; });
   window.addEventListener('mousemove', (e) => {
     if (!lockOn()) return;
@@ -281,15 +299,15 @@
   }, true);
   const eat = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
   ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'pointerdown', 'pointerup', 'auxclick'].forEach((t) => window.addEventListener(t, (e) => {
-    if (!S.on || !lockOn()) return;
+    if (!S.on || !lockOn() || VMS.w) return;
     if (e.target && e.target.closest && e.target.closest('#vs-ui')) return;
     if (t === 'mousedown') { if (e.button === 0) { lmb = true; startSwing(); } else if (e.button === 2) { placeBlock(); startSwing(); } }
     if (t === 'mouseup' && e.button === 0) lmb = false;
     if (t.indexOf('pointer') === 0) e.stopImmediatePropagation(); else eat(e);       // en los eventos de puntero no se cancela: si no, el navegador no manda mousedown/mouseup
   }, true));
   window.addEventListener('wheel', (e) => {
-    if (!S.on || !lockOn()) return;
-    if (wmode) wSel = (wSel + (e.deltaY > 0 ? 1 : 8)) % 9; else selSlot = (selSlot + (e.deltaY > 0 ? 1 : 8)) % 9; refreshHud(); eat(e);
+    if (!S.on || !lockOn() || VMS.w) return;
+    selSlot = (selSlot + (e.deltaY > 0 ? 1 : 8)) % 9; refreshHud(); eat(e);
   }, { capture: true, passive: false });
   document.addEventListener('pointerlockchange', () => { lmb = false; refreshHud(); });
   const startSwing = () => { if (swing < 0 || swing > 0.55) { swing = 0; swingT = performance.now(); } };
@@ -409,7 +427,7 @@
   };
   let cur = { hit: null, key: '', prog: 0 };
   function placeBlock() {
-    if (wmode) { S.why = 'estas con armas (0 vuelve a los bloques)'; return; }
+    if (VMS.w) { S.why = 'estas en armas (0 vuelve a los bloques)'; return; }
     if (selSlot === 0) { S.why = 'tienes la mano vacia (slot 1): pulsa 2-9 para elegir un bloque'; return; }
     if (!S.ready) { S.why = 'aun no cargo el dibujo'; return; }
     const cam = camNow(); if (!cam) { S.why = 'no hay camara'; return; }
@@ -476,8 +494,7 @@
     atlasImg = await loadImg('data:image/png;base64,' + ASSETS.atlas); if (!atlasImg) return;
     atlasTex = texFromImg(gl, atlasImg);
     lineBuf = gl.createBuffer();
-    for (const it of ASSETS.items) it._img = await loadImg('data:image/png;base64,' + it[1]);
-    buildItems(gl); buildIcons(); await setSkin(cfg.skin);
+    buildIcons(); await setSkin(cfg.skin);
     S.ready = true; refreshHud();
   };
   const setSkin = async (i) => {
@@ -589,7 +606,7 @@
     gl.useProgram(PR); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (cam && !wmode && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
+    if (cam && !VMS.w && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
       if (worldCnt) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
@@ -600,9 +617,7 @@
     gl.clear(gl.DEPTH_BUFFER_BIT);
     const asp = S.ov.width / S.ov.height, Ph = M.persp(70 * Math.PI / 180, asp, 0.05, 10);
     gl.useProgram(PR); gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (wmode) {
-      const ib = itemBuf(wSel); gl.bindTexture(gl.TEXTURE_2D, itemTex); gl.bindBuffer(gl.ARRAY_BUFFER, ib.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, itemHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, ib.n);
-    } else if (selSlot === 0) {
+    if (VMS.w || selSlot === 0) {
       if (!armBuf) { armBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); gl.bufferData(gl.ARRAY_BUFFER, armVerts(), gl.STATIC_DRAW); }
       gl.bindTexture(gl.TEXTURE_2D, skinTex); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, handMatrix())); gl.drawArrays(gl.TRIANGLES, 0, 36);
     } else {
@@ -650,17 +665,16 @@
   }
   function refreshHud() {
     ensureUI(); if (!hud) return;
-    hud.style.display = S.on && lockOn() && S.ready ? 'flex' : 'none';
+    hud.style.display = S.on && lockOn() && S.ready && !VMS.w ? 'flex' : 'none';
     hud.textContent = '';
     for (let i = 0; i < 9; i++) {
-      const s = mkEl('div', 'width:40px;height:40px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(139,139,139,.55);border:3px solid ' + (i === (wmode ? wSel : selSlot) ? '#fff' : '#555'));
-      if (wmode) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = 'data:image/png;base64,' + ASSETS.items[i][1]; s.appendChild(im); }
-      else if (i > 0 && BLK[i]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[i]; s.appendChild(im); }
+      const s = mkEl('div', 'width:40px;height:40px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(139,139,139,.55);border:3px solid ' + (i === selSlot ? '#fff' : '#555'));
+      if (i > 0 && BLK[i]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[i]; s.appendChild(im); }
       else if (i === 0) s.appendChild(mkEl('div', 'font-size:20px;line-height:1', '✋'));
       s.appendChild(mkEl('div', 'position:absolute;left:2px;top:0;font-size:9px;color:#ddd;text-shadow:1px 1px #000', String(i + 1)));
       hud.appendChild(s);
     }
-    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', wmode ? ASSETS.items[wSel][0] : selSlot ? BLK[selSlot].n : 'Mano');
+    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', selSlot ? BLK[selSlot].n : 'Mano');
     hud.appendChild(nm);
   }
   function setBuild(v, noSave) {
@@ -716,6 +730,7 @@
   const toast = (txt, bad) => {
     try {
       const t = mkEl('div', 'position:fixed;left:50%;top:12px;transform:translateX(-50%);max-width:90vw;padding:8px 14px;border-radius:6px;font:13px system-ui,sans-serif;color:#fff;z-index:2147483003;pointer-events:none;background:' + (bad ? 'rgba(160,30,30,.92)' : 'rgba(20,20,20,.88)'), txt);
+      if (!bad && toast.last) toast.last.remove(); toast.last = t;
       (document.body || document.documentElement).appendChild(t); setTimeout(() => t.remove(), bad ? 15000 : 6000);
     } catch (e) {}
   };
