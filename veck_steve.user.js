@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      2.2
+// @version      2.3
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -19,7 +19,7 @@
   const cfg = {
     key: ls.get('vs_key') || 'KeyB',                 // tecla para entrar/salir del modo bloques
     scale: parseFloat(ls.get('vs_scale')) || 1,
-    eyeH: parseFloat(ls.get('vs_eye')) || 1.6,        // altura de tus ojos sobre el suelo, medida en bloques       // tamano del bloque en unidades del juego
+    eyeH: parseFloat(ls.get('vs_eye')) || 1.4,        // altura de tus ojos sobre el suelo, medida en bloques       // tamano del bloque en unidades del juego
     hideGun: true,            // esconde la mano/arma del juego mientras estas en modo bloques. Tecla H lo cambia
     skin: Math.min(Math.max(parseInt(ls.get('vs_skin') || '0', 10) || 0, 0), ASSETS ? ASSETS.skins.length - 1 : 0),
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
@@ -28,7 +28,7 @@
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
-  const DBG = () => { window.__vsteve.world = world; window.__vsteve.camNow = camNow; window.__vsteve.placeTarget = placeTarget; window.__vsteve.dump = dumpData; };
+  const DBG = () => { window.__vsteve.world = world; window.__vsteve.camNow = camNow; window.__vsteve.placeTarget = placeTarget; window.__vsteve.dump = dumpData; window.__vsteve.dirty = () => { meshDirty = true; }; window.__vsteve.IG = IG; };
 
   // ------------------------------------------------------------------ matematicas (columna mayor, como WebGL)
   const M = {
@@ -91,15 +91,14 @@
   const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
   const MN = { vp: new Map(), VPc: null, vpf: -9, cands: [], pick: 0, hist: new Map(), seq: 0, evP: [], evR: [], P: null, V: null, pf: -9, vf: -9, nUm: 0, nUbo: 0, nP: 0, nR: 0, ctx2: false };
   const transp = (m) => { const o = new Float32Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c]; return o; };
-  const MU = { vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
+  const MU = { lastEye: null, vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
   const reUVP = /unity_MatrixVP|_MatrixVP|ViewProj|viewProj|u_?VP\b|uVP\b/i;
   const nameFeed = (n, v) => {
     if (!n || !v || v.length < 16) return;
     if (reUVP.test(n) && !/Inv|Prev|Last|Old|Shadow|Light/i.test(n)) {
       MU.names[n] = (MU.names[n] || 0) + 1;
       const f = v.length === 16 ? v : v.subarray(0, 16);
-      let ok = true; for (let i = 0; i < 16; i++) if (!Number.isFinite(f[i])) { ok = false; break; }
-      if (!ok) return;
+      if (!isVPlike(f)) return;
       const k = mkey(f), e = MU.vp.get(k);
       if (e) e.n++; else if (MU.vp.size < 300) MU.vp.set(k, { m: new Float32Array(f), n: 1, vp: true, named: true, age: 0 });
     }
@@ -117,10 +116,13 @@
     if (!feed1(m0)) feed1(transp(m0));
   };
   const mkey = (m) => Array.from(m, (v) => Math.round(v * 1e3)).join(',');
+  const eyeOf = (e) => e.eye || (e.eye = ((camFromVP(e.m) || {}).eye) || [0, 0, 0]);
+  const vpScore = (e) => { const ey = eyeOf(e); return MU.lastEye ? Math.hypot(ey[0] - MU.lastEye[0], ey[1] - MU.lastEye[1], ey[2] - MU.lastEye[2]) : (ey[1] > 0.3 && ey[1] < 4 ? 0 : 100) + (Math.hypot(ey[0], ey[1], ey[2]) < 0.05 ? 1000 : 0); };
+  const pickVP = (arr) => { let best = null, bs = 1e18; for (const e of arr) { const sc = vpScore(e); if (sc < bs) { bs = sc; best = e; } } return best; };
   const mnFrameEnd = () => {
     if (VMS.cur.length) { VMS.list = VMS.cur; VMS.cur = []; VMS.curSet = new Set(); }
-    { const arr = []; MU.vp.forEach((e) => arr.push(e)); arr.sort((a, b) => b.n - a.n); MU.vp.clear();
-      if (arr.length) { MU.cands = arr.slice(0, 12); const e = MU.cands[MN.pick % MU.cands.length]; MU.chosen = e.m; MU.f = S.frame; } }
+    { const arr = []; MU.vp.forEach((e) => arr.push(e)); arr.forEach((e) => { e.sc = vpScore(e); }); arr.sort((a, b) => a.sc - b.sc); MU.vp.clear();
+      if (arr.length) { MU.cands = arr.slice(0, 12); const e = MU.cands[MN.pick % MU.cands.length]; MU.chosen = e.m; MU.f = S.frame; MU.lastEye = eyeOf(e); } }
     // la vista es la matriz rigida que el juego sube justo al lado de la proyeccion (mismo momento, mismo cuadro)
     const best = new Map();
     for (const p of MN.evP) {
@@ -162,7 +164,7 @@
     if (navigator.gpu && navigator.gpu.requestAdapter) { const ra0 = navigator.gpu.requestAdapter.bind(navigator.gpu); navigator.gpu.requestAdapter = function () { EV.gpuReq++; return ra0.apply(null, arguments); }; }
   } catch (e) {}
   const locName = new WeakMap();
-  const mine = (gl) => !!(S.ov && gl && gl.canvas === S.ov);
+  const mine = (gl) => !!(S.inj || (S.ov && gl && gl.canvas === S.ov));
   const copy16 = (v) => { try { return new Float32Array(v); } catch (e) { return null; } };
   const hookGL = (C) => {
     const P = C.prototype;
@@ -197,7 +199,7 @@
       return um.apply(this, arguments);
     };
     ['bufferData', 'bufferSubData'].forEach((fn) => { const o = P[fn]; if (!o) return; P[fn] = function () { if (!mine(this)) { const a = arguments, d = fn === 'bufferData' ? a[1] : a[2]; if (d && typeof d === 'object') scanBuf(d); } return o.apply(this, arguments); }; });
-    const cl = P.clear; if (cl) P.clear = function (mask) { if (!mine(this) && (mask & 0x100)) S.dc++; return cl.apply(this, arguments); };
+    const cl = P.clear; if (cl) P.clear = function (mask) { if (!mine(this) && (mask & 0x100)) { if (S.dc + 1 === vmStart() && IG.on && S.on) injectWorld(this); S.dc++; } return cl.apply(this, arguments); };
     // mientras estas en modo bloques se salta el dibujo del arma (todo lo que se dibuja despues del segundo borrado de profundidad)
     ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements'].forEach((fn) => {
       const o = P[fn]; if (!o) return;
@@ -291,6 +293,7 @@
     else if (S.on && e.code === 'BracketRight') { cfg.scale = Math.min(50, +(cfg.scale * 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
+    else if (S.on && lockOn() && e.code === 'KeyO') { IG.on = !IG.on; ls.set('vs_ig', IG.on ? '1' : '0'); toast(IG.on ? 'Bloques tapados por las paredes: SI' : 'Bloques tapados por las paredes: NO (se dibujan encima de todo)'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && (e.code === 'Minus' || e.code === 'Equal')) {
       const N = Math.max(1, S.nPrev), cur = S.vmSeg || vmStart();
       S.vmSeg = e.code === 'Equal' ? (cur >= N ? 0 : cur + 1) : (S.vmSeg === 0 ? Math.max(1, vmStart() - 1) : cur <= 1 ? 0 : cur - 1);
@@ -365,7 +368,7 @@
       arr.push((ox + p[0]) * sz, (oy + p[1]) * sz, (oz + p[2]) * sz, UVC[i][0] ? uv[2] : uv[0], UVC[i][1] ? uv[3] : uv[1], col[0], col[1], col[2]);
     }
   };
-  let worldBuf = null, worldCnt = 0;
+  let worldBuf = null, worldCnt = 0, worldArr = null, worldVer = 0;
   const rebuildWorld = () => {
     const gl = S.gl, arr = [], sz = cfg.scale;
     world.forEach((id, k) => {
@@ -377,9 +380,9 @@
         pushFace(arr, x, y, z, sz, f, faceTile(b, f.kind), [tint[0] * f.sh, tint[1] * f.sh, tint[2] * f.sh]);
       }
     });
-    worldCnt = arr.length / 8;
+    worldCnt = arr.length / 8; worldArr = new Float32Array(arr); worldVer++;
     if (!worldBuf) worldBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); gl.bufferData(gl.ARRAY_BUFFER, worldArr, gl.DYNAMIC_DRAW);
     meshDirty = false;
   };
   // cubo unitario centrado (para el bloque en la mano), uno por tipo
@@ -545,6 +548,55 @@
   };
   const ULC = new WeakMap();
   const UL = (gl, prog, n) => { let m = ULC.get(prog); if (!m) { m = {}; ULC.set(prog, m); } return n in m ? m[n] : (m[n] = gl.getUniformLocation(prog, n)); };
+  // ---- dibujo de los bloques DENTRO del juego, justo antes del borrado de profundidad del arma: asi los bloques respetan las paredes del mapa
+  const IG = { on: ls.get('vs_ig') !== '0', ok: -99, gl: null, prog: null, vao: null, buf: null, tex: null, loc: null, ver: -1, err: '', n: 0 };
+  const setupIG = (gl) => {
+    S.inj = true;
+    const prog = mkProg(gl, VS, FS), vao = gl.createVertexArray ? gl.createVertexArray() : null, buf = gl.createBuffer();
+    if (!vao) throw new Error('sin VAO');
+    const sv = { vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING), ab: gl.getParameter(gl.ARRAY_BUFFER_BINDING), at: gl.getParameter(gl.ACTIVE_TEXTURE), fy: gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm: gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL) };
+    gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    [['aPos', 3, 0], ['aUv', 2, 12], ['aCol', 3, 20]].forEach(([n, c, o]) => { const l = gl.getAttribLocation(prog, n); if (l >= 0) { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, c, gl.FLOAT, false, 32, o); } });
+    gl.activeTexture(gl.TEXTURE0); const pt = gl.getParameter(gl.TEXTURE_BINDING_2D);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    const tex = texFromImg(gl, atlasImg);
+    gl.bindTexture(gl.TEXTURE_2D, pt); gl.activeTexture(sv.at); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, sv.fy); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, sv.pm);
+    gl.bindVertexArray(sv.vao); gl.bindBuffer(gl.ARRAY_BUFFER, sv.ab);
+    Object.assign(IG, { gl, prog, vao, buf, tex, ver: -1, loc: { mvp: gl.getUniformLocation(prog, 'uMVP'), tex: gl.getUniformLocation(prog, 'uTex'), alpha: gl.getUniformLocation(prog, 'uAlpha') } });
+  };
+  const injectWorld = (gl) => {
+    if (!S.ready || !world.size || !atlasImg || !gl.createVertexArray) return;
+    try {
+      S.inj = true;
+      if (meshDirty) rebuildWorld();
+      if (!worldCnt) return;
+      let e = null;
+      const cur = []; MU.vp.forEach((x) => cur.push(x)); if (cur.length) e = pickVP(cur);
+      const vp = e ? e.m : (MU.chosen && S.frame - MU.f < 8 ? MU.chosen : null); if (!vp) return;
+      const mvp = M.mul(vp, M.tr(0, (GR.YO || 0), 0));
+      if (IG.gl !== gl) setupIG(gl);
+      const P = (n) => gl.getParameter(n);
+      const sv = { prog: P(gl.CURRENT_PROGRAM), vao: P(gl.VERTEX_ARRAY_BINDING), ab: P(gl.ARRAY_BUFFER_BINDING), at: P(gl.ACTIVE_TEXTURE),
+        dt: gl.isEnabled(gl.DEPTH_TEST), df: P(gl.DEPTH_FUNC), dm: P(gl.DEPTH_WRITEMASK), bl: gl.isEnabled(gl.BLEND), cf: gl.isEnabled(gl.CULL_FACE), sc: gl.isEnabled(gl.SCISSOR_TEST), st: gl.isEnabled(gl.STENCIL_TEST),
+        cm: P(gl.COLOR_WRITEMASK), b0: P(gl.BLEND_SRC_RGB), b1: P(gl.BLEND_DST_RGB), b2: P(gl.BLEND_SRC_ALPHA), b3: P(gl.BLEND_DST_ALPHA), e0: P(gl.BLEND_EQUATION_RGB), e1: P(gl.BLEND_EQUATION_ALPHA), po: gl.isEnabled(gl.POLYGON_OFFSET_FILL), dith: gl.isEnabled(gl.DITHER) };
+      gl.activeTexture(gl.TEXTURE0); const t0 = P(gl.TEXTURE_BINDING_2D);
+      gl.bindVertexArray(IG.vao); gl.bindBuffer(gl.ARRAY_BUFFER, IG.buf);
+      if (IG.ver !== worldVer) { gl.bufferData(gl.ARRAY_BUFFER, worldArr, gl.DYNAMIC_DRAW); IG.ver = worldVer; }
+      gl.useProgram(IG.prog); gl.bindTexture(gl.TEXTURE_2D, IG.tex);
+      gl.uniformMatrix4fv(IG.loc.mvp, false, mvp); gl.uniform1i(IG.loc.tex, 0); gl.uniform1f(IG.loc.alpha, 1);
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.enable(gl.BLEND); gl.blendEquation(gl.FUNC_ADD); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE); gl.colorMask(true, true, true, false);
+      gl.drawArrays(gl.TRIANGLES, 0, worldCnt);
+      // devolver TODO como estaba: el juego guarda su propia copia del estado
+      gl.colorMask(sv.cm[0], sv.cm[1], sv.cm[2], sv.cm[3]);
+      gl.blendEquationSeparate(sv.e0, sv.e1); gl.blendFuncSeparate(sv.b0, sv.b1, sv.b2, sv.b3);
+      (sv.bl ? gl.enable : gl.disable).call(gl, gl.BLEND); (sv.dt ? gl.enable : gl.disable).call(gl, gl.DEPTH_TEST); gl.depthFunc(sv.df); gl.depthMask(sv.dm);
+      (sv.cf ? gl.enable : gl.disable).call(gl, gl.CULL_FACE); (sv.sc ? gl.enable : gl.disable).call(gl, gl.SCISSOR_TEST); (sv.st ? gl.enable : gl.disable).call(gl, gl.STENCIL_TEST); (sv.po ? gl.enable : gl.disable).call(gl, gl.POLYGON_OFFSET_FILL);
+      gl.bindTexture(gl.TEXTURE_2D, t0); gl.activeTexture(sv.at); gl.useProgram(sv.prog); gl.bindVertexArray(sv.vao); gl.bindBuffer(gl.ARRAY_BUFFER, sv.ab);
+      IG.ok = S.frame; IG.n++;
+    } catch (er) { IG.err = String(er && er.message || er); IG.on = false; try { toast('Oclusion desactivada por un error: ' + IG.err, true); } catch (e2) {} }
+    finally { S.inj = false; }
+  };
   const setMVP = (gl, prog, m) => gl.uniformMatrix4fv(UL(gl, prog, 'uMVP'), false, m);
 
   // --- mano / brazo de Steve (caja 4x12x4 de la skin; UV del brazo derecho en la skin de 64x32)
@@ -637,7 +689,7 @@
     if (cam && !VMS.w && !mcw && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
-      if (worldCnt) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
+      if (worldCnt && !(IG.on && S.frame - IG.ok < 4)) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
       drawCrack(gl, cam); drawOutline(gl, cam);
     }
     if (cam && debris.length) drawDebris(gl, cam, dt);
@@ -730,6 +782,7 @@
     row('Ultimo intento de poner: ' + (S.why || 'ninguno'));
     row('Camara: ' + (S.camMode === 'del juego' ? 'DEL JUEGO (' + S.camSrc + ')' : 'no encontrada -> estimada') + '   FPS overlay: ' + S.fps);
     row('Motor: contextos ' + JSON.stringify(EV.ctx) + ', offscreen ' + EV.off + ', workers ' + EV.workers + ', WebGPU pedido ' + EV.gpuReq + ', escrituras GPU ' + EV.wb + ', frame principal: ' + EV.top + ', ' + EV.where);
+    row('Bloques tapados por paredes (O): ' + (IG.on ? 'SI' : 'NO') + ', dibujos dentro del juego: ' + IG.n + (IG.err ? ', error: ' + IG.err : ''));
     row('Borrados de profundidad por cuadro: ' + S.nPrev + ', dibujos por tramo: [' + S.segPrev.map((v) => v || 0).join(', ') + '], tramo del arma: ' + vmStart() + (S.vmSeg ? ' (manual)' : ' (auto)') + '   (teclas - y =)');
     row('Llamadas: ' + Object.keys(EV.calls).map((k) => k + ' ' + EV.calls[k]).join(', '));
     row('Datos: uniforms ' + MN.nUm + ', subidas ' + MN.nUbo + ', proyecciones ' + MN.nP + ', vistas ' + MN.nR + ', WebGL2: ' + (window.WebGL2RenderingContext ? 'si' : 'no'));
