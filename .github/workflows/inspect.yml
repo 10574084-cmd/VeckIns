@@ -1,0 +1,22 @@
+name: Inspeccionar veck.io
+on:
+  workflow_dispatch:
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm init -y && npm i playwright@1.48.2
+      - run: npx playwright install --with-deps chromium
+      - run: node inspect.mjs
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veck-inspeccion
+          path: out/
+          retention-days: 7
