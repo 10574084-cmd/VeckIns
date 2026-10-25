@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      2.1
+// @version      2.2
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -207,8 +207,7 @@
           const a = arguments, cnt = fn.indexOf('Elements') >= 0 ? a[1] : a[2], sig = 'n' + cnt;     // solo la cantidad: el id de textura/programa cambia en cada carga
           const big = cnt >= 9;                                                  // los dibujos de pocos vertices son pantallas completas (efectos): nunca se tocan
           if (big && !VMS.curSet.has(sig)) { VMS.curSet.add(sig); VMS.cur.push(sig); }
-          if (!VMS.w) return;                                                     // modo bloques: todo lo del arma oculto
-          if (big && (VMS.hand.has(sig) || VMS.probe === sig)) return;           // modo armas: solo se esconde la mano marcada
+          if (big) { if (!VMS.w) return; if (VMS.hand.has(sig) || VMS.probe === sig) return; }   // bloques: se oculta el arma entera; armas: solo la mano marcada. Los dibujos pequenos (pantalla completa) siempre pasan
         }
         return o.apply(this, arguments);
       };
