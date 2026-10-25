@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      1.8
+// @version      1.9
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -269,6 +269,7 @@
   // ------------------------------------------------------------------ entrada
   const K = {};
   const mouse = { dx: 0, dy: 0 };
+  let mcw = false, wSel = 0;                                                  // mcw: barra de armas de Minecraft (0 cambia: bloques -> armas MC -> armas Veck.io -> bloques)
   let selSlot = 0, lmb = false, swing = -1, swingT = 0;
   const lockOn = () => !!document.pointerLockElement;
   window.addEventListener('keydown', (e) => {
@@ -283,7 +284,7 @@
     else if (S.on && e.code === 'BracketRight') { cfg.scale = Math.min(50, +(cfg.scale * 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
-    else if (S.on && lockOn() && e.code === 'Digit0') { VMS.w = !VMS.w; VMS.probe = null; refreshHud(); toast(VMS.w ? 'Armas de Veck.io (0 vuelve a los bloques). Mano del juego: , y . la buscan, / la oculta, \\ deshace todo' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && e.code === 'Digit0') { if (!mcw && !VMS.w) mcw = true; else if (mcw) { mcw = false; VMS.w = true; } else VMS.w = false; VMS.probe = null; refreshHud(); toast(mcw ? 'Armas de Minecraft: 1-9 para elegir (0 = armas de Veck.io)' : VMS.w ? 'Armas de Veck.io (0 = bloques). Mano del juego: , y . la buscan, / la oculta, \\ deshace todo' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && VMS.w && e.code === 'Backslash') { VMS.hand.clear(); VMS.probe = null; VMS.pi = -1; try { localStorage.removeItem('vs_hand2'); } catch (er) {} toast('Mano del juego: todo visible otra vez'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && VMS.w && (e.code === 'Comma' || e.code === 'Period' || e.code === 'Slash')) {
       const L = VMS.list; e.preventDefault(); e.stopImmediatePropagation();
@@ -291,7 +292,7 @@
       else if (e.code === 'Slash') { const sg = L[VMS.pi]; if (sg == null) toast('Primero busca con , y .'); else { if (VMS.hand.has(sg)) VMS.hand.delete(sg); else VMS.hand.add(sg); try { localStorage.setItem('vs_hand2', JSON.stringify([...VMS.hand])); } catch (er) {} toast(VMS.hand.has(sg) ? 'Parte ' + (VMS.pi + 1) + ' oculta para siempre' : 'Parte ' + (VMS.pi + 1) + ' visible otra vez'); } }
       else { VMS.pi = ((VMS.pi < 0 ? (e.code === 'Period' ? -1 : 0) : VMS.pi) + (e.code === 'Period' ? 1 : -1) + L.length) % L.length; VMS.probe = L[VMS.pi]; toast('Parte ' + (VMS.pi + 1) + ' de ' + L.length + ' escondida ahora' + (VMS.hand.has(L[VMS.pi]) ? ' (ya es mano)' : '') + ': si era la mano pulsa /'); }
     }
-    else if (S.on && lockOn() && !VMS.w && /^Digit[1-9]$/.test(e.code)) { selSlot = +e.code.slice(5) - 1; refreshHud(); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && !VMS.w && /^Digit[1-9]$/.test(e.code)) { const n = +e.code.slice(5) - 1; if (mcw) wSel = n; else selSlot = n; refreshHud(); e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
   window.addEventListener('keyup', (e) => { K[e.code] = false; if (S.on && lockOn() && (e.code === 'Digit0' || (!VMS.w && /^Digit[1-9]$/.test(e.code)))) e.stopImmediatePropagation(); }, true);
   window.addEventListener('blur', () => { for (const k in K) K[k] = false; lmb = false; });
@@ -310,7 +311,7 @@
   }, true));
   window.addEventListener('wheel', (e) => {
     if (!S.on || !lockOn() || VMS.w) return;
-    selSlot = (selSlot + (e.deltaY > 0 ? 1 : 8)) % 9; refreshHud(); eat(e);
+    if (mcw) wSel = (wSel + (e.deltaY > 0 ? 1 : 8)) % 9; else selSlot = (selSlot + (e.deltaY > 0 ? 1 : 8)) % 9; refreshHud(); eat(e);
   }, { capture: true, passive: false });
   document.addEventListener('pointerlockchange', () => { lmb = false; refreshHud(); });
   const startSwing = () => { if (swing < 0 || swing > 0.55) { swing = 0; swingT = performance.now(); } };
@@ -430,7 +431,7 @@
   };
   let cur = { hit: null, key: '', prog: 0 };
   function placeBlock() {
-    if (VMS.w) { S.why = 'estas en armas (0 vuelve a los bloques)'; return; }
+    if (VMS.w || mcw) { S.why = 'estas en armas (pulsa 0 hasta volver a los bloques)'; return; }
     if (selSlot === 0) { S.why = 'tienes la mano vacia (slot 1): pulsa 2-9 para elegir un bloque'; return; }
     if (!S.ready) { S.why = 'aun no cargo el dibujo'; return; }
     const cam = camNow(); if (!cam) { S.why = 'no hay camara'; return; }
@@ -497,7 +498,8 @@
     atlasImg = await loadImg('data:image/png;base64,' + ASSETS.atlas); if (!atlasImg) return;
     atlasTex = texFromImg(gl, atlasImg);
     lineBuf = gl.createBuffer();
-    buildIcons(); await setSkin(cfg.skin);
+    for (const it of ASSETS.items) it._img = await loadImg('data:image/png;base64,' + it[1]);
+    buildItems(gl); buildIcons(); await setSkin(cfg.skin);
     S.ready = true; refreshHud();
   };
   const setSkin = async (i) => {
@@ -609,7 +611,7 @@
     gl.useProgram(PR); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (cam && !VMS.w && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
+    if (cam && !VMS.w && !mcw && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
       if (worldCnt) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
@@ -620,7 +622,9 @@
     gl.clear(gl.DEPTH_BUFFER_BIT);
     const asp = S.ov.width / S.ov.height, Ph = M.persp(70 * Math.PI / 180, asp, 0.05, 10);
     gl.useProgram(PR); gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (VMS.w || selSlot === 0) {
+    if (mcw) {
+      const ib = itemBuf(wSel); gl.bindTexture(gl.TEXTURE_2D, itemTex); gl.bindBuffer(gl.ARRAY_BUFFER, ib.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, itemHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, ib.n);
+    } else if (VMS.w || selSlot === 0) {
       if (!armBuf) { armBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); gl.bufferData(gl.ARRAY_BUFFER, armVerts(), gl.STATIC_DRAW); }
       gl.bindTexture(gl.TEXTURE_2D, skinTex); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, handMatrix())); gl.drawArrays(gl.TRIANGLES, 0, 36);
     } else {
@@ -671,13 +675,14 @@
     hud.style.display = S.on && lockOn() && S.ready && !VMS.w ? 'flex' : 'none';
     hud.textContent = '';
     for (let i = 0; i < 9; i++) {
-      const s = mkEl('div', 'width:40px;height:40px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(139,139,139,.55);border:3px solid ' + (i === selSlot ? '#fff' : '#555'));
-      if (i > 0 && BLK[i]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[i]; s.appendChild(im); }
+      const s = mkEl('div', 'width:40px;height:40px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(139,139,139,.55);border:3px solid ' + (i === (mcw ? wSel : selSlot) ? '#fff' : '#555'));
+      if (mcw) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = 'data:image/png;base64,' + ASSETS.items[i][1]; s.appendChild(im); }
+      else if (i > 0 && BLK[i]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[i]; s.appendChild(im); }
       else if (i === 0) s.appendChild(mkEl('div', 'font-size:20px;line-height:1', '✋'));
       s.appendChild(mkEl('div', 'position:absolute;left:2px;top:0;font-size:9px;color:#ddd;text-shadow:1px 1px #000', String(i + 1)));
       hud.appendChild(s);
     }
-    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', selSlot ? BLK[selSlot].n : 'Mano');
+    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', mcw ? ASSETS.items[wSel][0] : selSlot ? BLK[selSlot].n : 'Mano');
     hud.appendChild(nm);
   }
   function setBuild(v, noSave) {
