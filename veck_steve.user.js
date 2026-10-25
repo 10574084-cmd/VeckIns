@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      2.3
+// @version      2.4
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -91,16 +91,18 @@
   const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
   const MN = { vp: new Map(), VPc: null, vpf: -9, cands: [], pick: 0, hist: new Map(), seq: 0, evP: [], evR: [], P: null, V: null, pf: -9, vf: -9, nUm: 0, nUbo: 0, nP: 0, nR: 0, ctx2: false };
   const transp = (m) => { const o = new Float32Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c]; return o; };
-  const MU = { lastEye: null, vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
+  const MU = { role: null, pl: [], lastEye: null, vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
   const reUVP = /unity_MatrixVP|_MatrixVP|ViewProj|viewProj|u_?VP\b|uVP\b/i;
   const nameFeed = (n, v) => {
     if (!n || !v || v.length < 16) return;
+    if (/glstate_matrix_projection|unity_CameraProjection/.test(n) && MU.pl.length < 24) { const f = v.length === 16 ? v : v.subarray(0, 16); if (isP(f)) MU.pl.push(new Float32Array(f)); }
     if (reUVP.test(n) && !/Inv|Prev|Last|Old|Shadow|Light/i.test(n)) {
       MU.names[n] = (MU.names[n] || 0) + 1;
       const f = v.length === 16 ? v : v.subarray(0, 16);
       if (!isVPlike(f)) return;
+      if (!MU.vpT) MU.vpT = new Map();
       const k = mkey(f), e = MU.vp.get(k);
-      if (e) e.n++; else if (MU.vp.size < 300) MU.vp.set(k, { m: new Float32Array(f), n: 1, vp: true, named: true, age: 0 });
+      if (e) e.n++; else if (MU.vp.size < 300) MU.vp.set(k, { m: new Float32Array(f), n: 1, vp: true, named: true, age: 0, t: S.dc });
     }
   };
   const SMP = { P: [], VP: [], R: [], raw: [] };
@@ -117,12 +119,19 @@
   };
   const mkey = (m) => Array.from(m, (v) => Math.round(v * 1e3)).join(',');
   const eyeOf = (e) => e.eye || (e.eye = ((camFromVP(e.m) || {}).eye) || [0, 0, 0]);
-  const vpScore = (e) => { const ey = eyeOf(e); return MU.lastEye ? Math.hypot(ey[0] - MU.lastEye[0], ey[1] - MU.lastEye[1], ey[2] - MU.lastEye[2]) : (ey[1] > 0.3 && ey[1] < 4 ? 0 : 100) + (Math.hypot(ey[0], ey[1], ey[2]) < 0.05 ? 1000 : 0); };
-  const pickVP = (arr) => { let best = null, bs = 1e18; for (const e of arr) { const sc = vpScore(e); if (sc < bs) { bs = sc; best = e; } } return best; };
+  const vpFit = (e) => { if (e.fit !== undefined) return e.fit; e.fit = false; for (const P of MU.pl) { const iP = M.inv(P); if (!iP) continue; const V = M.mul(iP, e.m); if (isRigid(V) || (Math.abs(V[15] - 1) < 1e-3 && Math.abs(V[3]) + Math.abs(V[7]) + Math.abs(V[11]) < 1e-3)) { e.fit = true; e.P = P; break; } } return e.fit; };
+  const vpScore = (e) => { const b = vpScore0(e); return b + (vpFit(e) ? 0 : 500); };
+  const vpScore0 = (e) => { const ey = eyeOf(e); return MU.lastEye ? Math.hypot(ey[0] - MU.lastEye[0], ey[1] - MU.lastEye[1], ey[2] - MU.lastEye[2]) : (ey[1] > 0.3 && ey[1] < 4 ? 0 : 100) + (Math.hypot(ey[0], ey[1], ey[2]) < 0.05 ? 1000 : 0); };
+  const pickVP = (arr) => {
+    if (!arr.length) return null;
+    if (MU.role !== null) return arr[MU.role % arr.length];                       // el jugador eligio con C: se respeta el orden de subida
+    let best = null, bs = 1e18; for (const e of arr) { const sc = vpScore(e); if (sc < bs) { bs = sc; best = e; } } return best;
+  };
   const mnFrameEnd = () => {
     if (VMS.cur.length) { VMS.list = VMS.cur; VMS.cur = []; VMS.curSet = new Set(); }
-    { const arr = []; MU.vp.forEach((e) => arr.push(e)); arr.forEach((e) => { e.sc = vpScore(e); }); arr.sort((a, b) => a.sc - b.sc); MU.vp.clear();
-      if (arr.length) { MU.cands = arr.slice(0, 12); const e = MU.cands[MN.pick % MU.cands.length]; MU.chosen = e.m; MU.f = S.frame; MU.lastEye = eyeOf(e); } }
+    { const arr = []; MU.vp.forEach((e) => arr.push(e)); arr.forEach((e) => { e.sc = vpScore(e); });
+      if (arr.length) { MU.cands = arr.slice(0, 12); const e = pickVP(arr); MU.chosen = e.m; MU.f = S.frame; MU.lastEye = eyeOf(e); MU.cur = e; MU.curIdx = arr.indexOf(e); }
+      MU.vp.clear(); MU.pl = []; }
     // la vista es la matriz rigida que el juego sube justo al lado de la proyeccion (mismo momento, mismo cuadro)
     const best = new Map();
     for (const p of MN.evP) {
@@ -287,6 +296,8 @@
     if (typing) return;
     if (e.code === cfg.key && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey) { setBuild(!S.on); }
     else if (e.code === 'F9' || e.code === 'Backquote' || e.code === 'KeyU') { e.preventDefault(); togglePanel(); }
+    else if (e.code === 'KeyC' && S.on && MU.cands.length) { const L = MU.cands.length; MU.role = (((MU.role === null ? (MU.curIdx || 0) : MU.role) + 1) % L); GR.frame = -1; resetGround(); toast('Camara candidata ' + (MU.role + 1) + ' de ' + L + ' (C = siguiente, Shift+C = automatica): si el bloque se mueve contigo, pulsa C otra vez'); updPanel(); e.preventDefault(); }
+    else if (e.code === 'KeyC' && S.on && e.shiftKey) { MU.role = null; toast('Camara automatica'); }
     else if (e.code === 'KeyC' && S.on) { MN.pick++; GR.frame = -1; resetGround(); toast('Probando otra camara candidata: ' + (MN.pick % Math.max(1, MN.cands.length) + 1) + ' de ' + MN.cands.length); updPanel(); }
     else if (e.code === 'KeyN' && S.on) { cfg.direct = !cfg.direct; ls.set('vs_direct', cfg.direct ? '1' : '0'); toast('Steve y bloques: modo ' + (cfg.direct ? 'DIRECTO' : 'iframe') + '. Recarga la pagina (F5) para aplicarlo.'); }
     else if (S.on && e.code === 'BracketLeft') { cfg.scale = Math.max(0.05, +(cfg.scale / 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
@@ -571,7 +582,7 @@
       if (meshDirty) rebuildWorld();
       if (!worldCnt) return;
       let e = null;
-      const cur = []; MU.vp.forEach((x) => cur.push(x)); if (cur.length) e = pickVP(cur);
+      const cur = []; MU.vp.forEach((x) => cur.push(x)); if (cur.length) { e = pickVP(cur); MU.curIdx = cur.indexOf(e); }
       const vp = e ? e.m : (MU.chosen && S.frame - MU.f < 8 ? MU.chosen : null); if (!vp) return;
       const mvp = M.mul(vp, M.tr(0, (GR.YO || 0), 0));
       if (IG.gl !== gl) setupIG(gl);
@@ -789,7 +800,8 @@
     row('Bloques puestos: ' + world.size + '   tamano de bloque: ' + cfg.scale + '   ojos: ' + cfg.eyeH + ' bloques');
     row('Matrices que manda el juego: ' + names);
     row('Proyeccion hallada: ' + (MN.P ? 'fov ~' + Math.round(2 * Math.atan(1 / MN.P[5]) * 180 / Math.PI) + ' grados' : 'no') + '   Candidatas de vista (C para probar la siguiente): ' + MN.cands.length + ' (usando la ' + (MN.cands.length ? MN.pick % MN.cands.length + 1 : 0) + ')   Nombradas VP: ' + JSON.stringify(MU.names));
-    (MU.cands.length ? MU.cands : MN.cands).slice(0, 4).forEach((e, i) => row('  ' + (i + 1) + (e.vp ? ') VP usos ' + e.n + ', mira ' + [-e.m[3], -e.m[7], -e.m[11]].map((v) => v.toFixed(2)).join(', ') : ') usos ' + e.n + ', quieta ' + e.age + ', pos ') + [e.m[12], e.m[13], e.m[14]].map((v) => v.toFixed(1)).join(', ')));
+    if (MU.cands.length) { row('Camaras candidatas (C cambia, Shift+C automatica): usando la ' + ((MU.curIdx || 0) + 1) + ' de ' + MU.cands.length + (MU.role !== null ? ' (manual)' : ' (auto)')); MU.cands.slice(0, 6).forEach((e, i) => { const ey = eyeOf(e), r1 = Math.hypot(e.m[1], e.m[5], e.m[9]); row('  ' + (i + 1) + ') ' + (i === MU.curIdx ? '>> ' : '') + 'fov ' + Math.round(2 * Math.atan(1 / r1) * 180 / Math.PI) + ', ojo ' + ey.map((v) => v.toFixed(1)).join(',') + ', tramo ' + e.t + ', usos ' + e.n + (e.fit ? ', con proyeccion' : '')); }); }
+    (MU.cands.length ? [] : MN.cands).slice(0, 4).forEach((e, i) => row('  ' + (i + 1) + (e.vp ? ') VP usos ' + e.n + ', mira ' + [-e.m[3], -e.m[7], -e.m[11]].map((v) => v.toFixed(2)).join(', ') : ') usos ' + e.n + ', quieta ' + e.age + ', pos ') + [e.m[12], e.m[13], e.m[14]].map((v) => v.toFixed(1)).join(', ')));
     const mkBtn = (txt, fn) => { const b = mkEl('button', 'margin:3px 4px 0 0;padding:3px 8px;background:#333;color:#fff;border:1px solid #777;border-radius:4px;cursor:pointer', txt); b.onclick = (e) => { e.stopPropagation(); fn(); }; panel.appendChild(b); };
     mkBtn('Bloque -', () => { cfg.scale = Math.max(0.05, +(cfg.scale / 1.25).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; updPanel(); });
     mkBtn('Bloque +', () => { cfg.scale = Math.min(50, +(cfg.scale * 1.25).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; updPanel(); });
