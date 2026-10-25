@@ -1,0 +1,70 @@
+{
+ "canvases": [],
+ "globals": [
+  "WebGLVertexArrayObject:function",
+  "WebGLUniformLocation:function",
+  "WebGLTransformFeedback:function",
+  "WebGLTexture:function",
+  "WebGLSync:function",
+  "WebGLShaderPrecisionFormat:function",
+  "WebGLShader:function",
+  "WebGLSampler:function",
+  "WebGLRenderingContext:function",
+  "WebGLRenderbuffer:function",
+  "WebGLQuery:function",
+  "WebGLProgram:function",
+  "WebGLObject:function",
+  "WebGLFramebuffer:function",
+  "WebGLContextEvent:function",
+  "WebGLBuffer:function",
+  "WebGLActiveInfo:function",
+  "WebGL2RenderingContext:function",
+  "GamepadHapticActuator:function",
+  "GamepadEvent:function",
+  "GamepadButton:function",
+  "Gamepad:function",
+  "onappinstalled:object",
+  "GPUShaderModule:function",
+  "XRWebGLBinding:function",
+  "XRWebGLDepthInformation:function",
+  "XRWebGLLayer:function"
+ ],
+ "dump": {
+  "EV": {
+   "calls": {},
+   "ctx": {},
+   "off": 0,
+   "workers": 2,
+   "gpuReq": 1,
+   "wb": 0,
+   "top": true,
+   "where": "veck.io"
+  },
+  "counts": {
+   "um": 0,
+   "ubo": 0,
+   "P": 0,
+   "R": 0
+  },
+  "cands": [],
+  "SMP": {
+   "P": [],
+   "VP": [],
+   "R": [],
+   "raw": []
+  },
+  "cam": {
+   "eye": [
+    0,
+    1.6,
+    0
+   ],
+   "dir": [
+    0,
+    2.860641430843363e-7,
+    -0.9999999999999591
+   ],
+   "mode": "estimada"
+  }
+ }
+}
