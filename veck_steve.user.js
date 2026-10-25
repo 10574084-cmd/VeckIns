@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      2.0
+// @version      2.1
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,7 +27,7 @@
   };
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
-  const dumpData = () => JSON.stringify({ EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
+  const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
   const DBG = () => { window.__vsteve.world = world; window.__vsteve.camNow = camNow; window.__vsteve.placeTarget = placeTarget; window.__vsteve.dump = dumpData; };
 
   // ------------------------------------------------------------------ matematicas (columna mayor, como WebGL)
