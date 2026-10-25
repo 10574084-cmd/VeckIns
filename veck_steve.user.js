@@ -80,7 +80,7 @@
   };
   // viewmodel del juego (arma + mano): se identifica cada dibujo por programa|textura|cantidad para poder esconder solo la mano
   const VMS = { w: false, prog: 0, tex: 0, ids: new WeakMap(), n: 0, cur: [], curSet: new Set(), list: [], pi: -1, hand: new Set(), probe: null };
-  try { JSON.parse(localStorage.getItem('vs_hand') || '[]').forEach((x) => VMS.hand.add(x)); } catch (e) {}
+  try { JSON.parse(localStorage.getItem('vs_hand2') || '[]').forEach((x) => VMS.hand.add(x)); } catch (e) {}
   const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
   const MN = { vp: new Map(), VPc: null, vpf: -9, cands: [], pick: 0, hist: new Map(), seq: 0, evP: [], evR: [], P: null, V: null, pf: -9, vf: -9, nUm: 0, nUbo: 0, nP: 0, nR: 0, ctx2: false };
   const transp = (m) => { const o = new Float32Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c]; return o; };
@@ -196,9 +196,11 @@
       const o = P[fn]; if (!o) return;
       P[fn] = function () {
         if (S.on && S.dc >= 2 && !mine(this)) {
-          const a = arguments, sig = VMS.prog + '|' + VMS.tex + '|' + (fn.indexOf('Elements') >= 0 ? a[1] : a[2]);
-          if (!VMS.curSet.has(sig)) { VMS.curSet.add(sig); VMS.cur.push(sig); }
-          if (!VMS.w || VMS.hand.has(sig) || VMS.probe === sig) return;          // modo bloques: todo oculto. Modo armas: solo la mano
+          const a = arguments, cnt = fn.indexOf('Elements') >= 0 ? a[1] : a[2], sig = 'n' + cnt;     // solo la cantidad: el id de textura/programa cambia en cada carga
+          const big = cnt >= 9;                                                  // los dibujos de pocos vertices son pantallas completas (efectos): nunca se tocan
+          if (big && !VMS.curSet.has(sig)) { VMS.curSet.add(sig); VMS.cur.push(sig); }
+          if (!VMS.w) return;                                                     // modo bloques: todo lo del arma oculto
+          if (big && (VMS.hand.has(sig) || VMS.probe === sig)) return;           // modo armas: solo se esconde la mano marcada
         }
         return o.apply(this, arguments);
       };
@@ -281,11 +283,12 @@
     else if (S.on && e.code === 'BracketRight') { cfg.scale = Math.min(50, +(cfg.scale * 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
-    else if (S.on && lockOn() && e.code === 'Digit0') { VMS.w = !VMS.w; VMS.probe = null; refreshHud(); toast(VMS.w ? 'Armas de Veck.io (0 vuelve a los bloques). Si ves la mano del juego: , y . la buscan, / la deja oculta' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && e.code === 'Digit0') { VMS.w = !VMS.w; VMS.probe = null; refreshHud(); toast(VMS.w ? 'Armas de Veck.io (0 vuelve a los bloques). Mano del juego: , y . la buscan, / la oculta, \\ deshace todo' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && lockOn() && VMS.w && e.code === 'Backslash') { VMS.hand.clear(); VMS.probe = null; VMS.pi = -1; try { localStorage.removeItem('vs_hand2'); } catch (er) {} toast('Mano del juego: todo visible otra vez'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && VMS.w && (e.code === 'Comma' || e.code === 'Period' || e.code === 'Slash')) {
       const L = VMS.list; e.preventDefault(); e.stopImmediatePropagation();
       if (!L.length) { toast('No veo partes del arma todavia'); }
-      else if (e.code === 'Slash') { const sg = L[VMS.pi]; if (sg == null) toast('Primero busca con , y .'); else { if (VMS.hand.has(sg)) VMS.hand.delete(sg); else VMS.hand.add(sg); try { localStorage.setItem('vs_hand', JSON.stringify([...VMS.hand])); } catch (er) {} toast(VMS.hand.has(sg) ? 'Parte ' + (VMS.pi + 1) + ' oculta para siempre' : 'Parte ' + (VMS.pi + 1) + ' visible otra vez'); } }
+      else if (e.code === 'Slash') { const sg = L[VMS.pi]; if (sg == null) toast('Primero busca con , y .'); else { if (VMS.hand.has(sg)) VMS.hand.delete(sg); else VMS.hand.add(sg); try { localStorage.setItem('vs_hand2', JSON.stringify([...VMS.hand])); } catch (er) {} toast(VMS.hand.has(sg) ? 'Parte ' + (VMS.pi + 1) + ' oculta para siempre' : 'Parte ' + (VMS.pi + 1) + ' visible otra vez'); } }
       else { VMS.pi = ((VMS.pi < 0 ? (e.code === 'Period' ? -1 : 0) : VMS.pi) + (e.code === 'Period' ? 1 : -1) + L.length) % L.length; VMS.probe = L[VMS.pi]; toast('Parte ' + (VMS.pi + 1) + ' de ' + L.length + ' escondida ahora' + (VMS.hand.has(L[VMS.pi]) ? ' (ya es mano)' : '') + ': si era la mano pulsa /'); }
     }
     else if (S.on && lockOn() && !VMS.w && /^Digit[1-9]$/.test(e.code)) { selSlot = +e.code.slice(5) - 1; refreshHud(); e.stopImmediatePropagation(); e.preventDefault(); }
