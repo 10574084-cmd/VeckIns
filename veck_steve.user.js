@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      1.9
+// @version      2.0
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -25,7 +25,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0 };
+  const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
   const DBG = () => { window.__vsteve.world = world; window.__vsteve.camNow = camNow; window.__vsteve.placeTarget = placeTarget; window.__vsteve.dump = dumpData; };
@@ -79,6 +79,13 @@
     return Math.abs(m[15]) < 1e4 && !(m[15] === 0 && m[3] === 0 && m[7] === 0 && m[11] === 0);
   };
   // viewmodel del juego (arma + mano): se identifica cada dibujo por programa|textura|cantidad para poder esconder solo la mano
+  // el arma/mano esta en el tramo que sigue a un borrado de profundidad; Unity hace varios por cuadro, asi que se toma el ultimo con dibujos (o el que elija el jugador con - y =)
+  const vmStart = () => {
+    if (S.vmSeg > 0) return S.vmSeg;
+    for (let k = S.segPrev.length - 1; k >= 1; k--) if (S.segPrev[k] > 0) return Math.max(2, k);
+    return 2;
+  };
+  try { S.vmSeg = parseInt(localStorage.getItem('vs_seg') || '0', 10) || 0; } catch (e) {}
   const VMS = { w: false, prog: 0, tex: 0, ids: new WeakMap(), n: 0, cur: [], curSet: new Set(), list: [], pi: -1, hand: new Set(), probe: null };
   try { JSON.parse(localStorage.getItem('vs_hand2') || '[]').forEach((x) => VMS.hand.add(x)); } catch (e) {}
   const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
@@ -195,7 +202,8 @@
     ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements'].forEach((fn) => {
       const o = P[fn]; if (!o) return;
       P[fn] = function () {
-        if (S.on && S.dc >= 2 && !mine(this)) {
+        if (!mine(this)) S.seg[S.dc] = (S.seg[S.dc] || 0) + 1;
+        if (S.on && S.dc >= vmStart() && !mine(this)) {
           const a = arguments, cnt = fn.indexOf('Elements') >= 0 ? a[1] : a[2], sig = 'n' + cnt;     // solo la cantidad: el id de textura/programa cambia en cada carga
           const big = cnt >= 9;                                                  // los dibujos de pocos vertices son pantallas completas (efectos): nunca se tocan
           if (big && !VMS.curSet.has(sig)) { VMS.curSet.add(sig); VMS.cur.push(sig); }
@@ -209,7 +217,7 @@
   if (window.WebGLRenderingContext) hookGL(window.WebGLRenderingContext);
   if (window.WebGL2RenderingContext) hookGL(window.WebGL2RenderingContext);
   const raf0 = window.requestAnimationFrame;
-  window.requestAnimationFrame = function (cb) { return raf0.call(window, function (t) { S.frame++; S.dc = 0; mnFrameEnd(); return cb(t); }); };
+  window.requestAnimationFrame = function (cb) { return raf0.call(window, function (t) { S.frame++; if (S.dc > 0 || S.seg.length) { S.nPrev = S.dc; S.segPrev = S.seg; } S.seg = []; S.dc = 0; mnFrameEnd(); return cb(t); }); };
 
   // camara efectiva de este cuadro: { VP, eye:[x,y,z], dir:[x,y,z] }
   const camRaw = () => {
@@ -284,6 +292,13 @@
     else if (S.on && e.code === 'BracketRight') { cfg.scale = Math.min(50, +(cfg.scale * 1.15).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; resetGround(); updPanel(); }
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
+    else if (S.on && lockOn() && (e.code === 'Minus' || e.code === 'Equal')) {
+      const N = Math.max(1, S.nPrev), cur = S.vmSeg || vmStart();
+      S.vmSeg = e.code === 'Equal' ? (cur >= N ? 0 : cur + 1) : (S.vmSeg === 0 ? Math.max(1, vmStart() - 1) : cur <= 1 ? 0 : cur - 1);
+      try { localStorage.setItem('vs_seg', String(S.vmSeg)); } catch (er) {}
+      toast('Arma del juego = tramo ' + vmStart() + ' de ' + N + (S.vmSeg ? ' (manual)' : ' (automatico)') + '. - y = lo cambian: si el mapa se ve negro en modo bloques, sube con =');
+      e.stopImmediatePropagation(); e.preventDefault();
+    }
     else if (S.on && lockOn() && e.code === 'Digit0') { if (!mcw && !VMS.w) mcw = true; else if (mcw) { mcw = false; VMS.w = true; } else VMS.w = false; VMS.probe = null; refreshHud(); toast(mcw ? 'Armas de Minecraft: 1-9 para elegir (0 = armas de Veck.io)' : VMS.w ? 'Armas de Veck.io (0 = bloques). Mano del juego: , y . la buscan, / la oculta, \\ deshace todo' : 'Bloques'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && VMS.w && e.code === 'Backslash') { VMS.hand.clear(); VMS.probe = null; VMS.pi = -1; try { localStorage.removeItem('vs_hand2'); } catch (er) {} toast('Mano del juego: todo visible otra vez'); e.stopImmediatePropagation(); e.preventDefault(); }
     else if (S.on && lockOn() && VMS.w && (e.code === 'Comma' || e.code === 'Period' || e.code === 'Slash')) {
@@ -586,6 +601,15 @@
     m = M.mul(m, M.ry(-0.45 + BOB.sx * 0.5)); m = M.mul(m, M.rx(0.1 - f2 * 1.0 + BOB.sy * 0.5)); m = M.mul(m, M.rz(0.5 - f1 * 0.5));
     return M.mul(m, M.sc(0.62, 0.62, 0.62));
   };
+  // brazo de Steve agarrando el arma del juego: sale de abajo al centro y sube hacia la derecha, donde el juego pone el agarre
+  const gunArmMatrix = () => {
+    const ph = BOB.d * Math.PI, a = BOB.amp, br = 1 - Math.min(1, a);
+    let m = M.tr(0.12 + Math.sin(ph) * a * 0.08 - BOB.sx * 0.35, -0.78 - Math.abs(Math.cos(ph)) * a * 0.1 + BOB.sy * 0.25 + BOB.jump * 0.04 + Math.sin(BOB.idle * 1.6) * 0.004 * br, -0.6);
+    m = M.mul(m, M.ry(-0.55 + BOB.sx * 0.5));
+    m = M.mul(m, M.rx(1.62 + BOB.sy * 0.6));
+    m = M.mul(m, M.rz(-0.35));
+    return M.mul(m, M.sc(1.3, 1, 1.3));
+  };
   const blockHandMatrix = () => {
     const ph = BOB.d * Math.PI, a = BOB.amp, sw = swing >= 0 ? swing : 0, f1 = Math.sin(sw * sw * Math.PI), f2 = Math.sin(Math.sqrt(sw) * Math.PI), f3 = Math.sin(Math.sqrt(sw) * Math.PI * 2);
     let m = M.tr(0.55 + Math.sin(ph) * a * 0.08 - BOB.sx * 0.35 - f2 * 0.3, -0.42 - Math.abs(Math.cos(ph)) * a * 0.1 + BOB.sy * 0.25 + BOB.jump * 0.04 + f3 * 0.12 + Math.sin(BOB.idle * 1.6) * 0.004 * (1 - Math.min(1, a)), -0.9 - f1 * 0.3);
@@ -626,7 +650,7 @@
       const ib = itemBuf(wSel); gl.bindTexture(gl.TEXTURE_2D, itemTex); gl.bindBuffer(gl.ARRAY_BUFFER, ib.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, itemHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, ib.n);
     } else if (VMS.w || selSlot === 0) {
       if (!armBuf) { armBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); gl.bufferData(gl.ARRAY_BUFFER, armVerts(), gl.STATIC_DRAW); }
-      gl.bindTexture(gl.TEXTURE_2D, skinTex); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, handMatrix())); gl.drawArrays(gl.TRIANGLES, 0, 36);
+      gl.bindTexture(gl.TEXTURE_2D, skinTex); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, VMS.w ? gunArmMatrix() : handMatrix())); gl.drawArrays(gl.TRIANGLES, 0, 36);
     } else {
       const cb = cubeBuf(selSlot); gl.bindTexture(gl.TEXTURE_2D, atlasTex); gl.bindBuffer(gl.ARRAY_BUFFER, cb.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, blockHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, cb.n);
     }
@@ -707,6 +731,7 @@
     row('Ultimo intento de poner: ' + (S.why || 'ninguno'));
     row('Camara: ' + (S.camMode === 'del juego' ? 'DEL JUEGO (' + S.camSrc + ')' : 'no encontrada -> estimada') + '   FPS overlay: ' + S.fps);
     row('Motor: contextos ' + JSON.stringify(EV.ctx) + ', offscreen ' + EV.off + ', workers ' + EV.workers + ', WebGPU pedido ' + EV.gpuReq + ', escrituras GPU ' + EV.wb + ', frame principal: ' + EV.top + ', ' + EV.where);
+    row('Borrados de profundidad por cuadro: ' + S.nPrev + ', dibujos por tramo: [' + S.segPrev.map((v) => v || 0).join(', ') + '], tramo del arma: ' + vmStart() + (S.vmSeg ? ' (manual)' : ' (auto)') + '   (teclas - y =)');
     row('Llamadas: ' + Object.keys(EV.calls).map((k) => k + ' ' + EV.calls[k]).join(', '));
     row('Datos: uniforms ' + MN.nUm + ', subidas ' + MN.nUbo + ', proyecciones ' + MN.nP + ', vistas ' + MN.nR + ', WebGL2: ' + (window.WebGL2RenderingContext ? 'si' : 'no'));
     row('Bloques puestos: ' + world.size + '   tamano de bloque: ' + cfg.scale + '   ojos: ' + cfg.eyeH + ' bloques');
