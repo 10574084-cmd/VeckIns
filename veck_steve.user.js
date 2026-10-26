@@ -3,7 +3,7 @@
 // @namespace    local
 // @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
 // @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
-// @version      3.2
+// @version      3.3
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,11 +27,9 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const VERSION = '3.2';
+  const VERSION = '3.3';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
-  const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
-  const DBG = () => { window.__vsteve.world = world; window.__vsteve.camNow = camNow; window.__vsteve.placeTarget = placeTarget; window.__vsteve.dump = dumpData; window.__vsteve.dirty = () => { meshDirty = true; }; window.__vsteve.IG = IG; window.__vsteve.MU = MU; };
 
   // ------------------------------------------------------------------ matematicas (columna mayor, como WebGL)
   const M = {
@@ -720,7 +718,6 @@
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
     if (cam && !VMS.w && !mcw && hotB[selSlot] > 0) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
-    if (cam && world.size && IG.on && !IG.hint && IG.n === 0 && S.frame > 600) { IG.hint = 1; toast('Los bloques se ven por encima de las paredes: el arma del juego no esta en el tramo que usa el codigo. Prueba las teclas - y = (tramo) hasta que se tapen. Panel: U', true); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
       if (worldCnt && !(IG.on && S.frame - IG.ok < 4)) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
@@ -856,32 +853,14 @@
   }
   function updPanel() {
     if (!panel) return;
-    const names = Object.keys(S.names).sort((a, b) => S.names[b] - S.names[a]).slice(0, 8).map((n) => n + ' x' + S.names[n]).join(', ') || 'ninguno';
     panel.textContent = '';
     const row = (t) => { panel.appendChild(mkEl('div', 'margin:2px 0', t)); };
     panel.appendChild(mkEl('div', 'font-weight:700;margin-bottom:4px', 'Steve y bloques v' + VERSION + '  (tecla U cierra)'));
-    row('Dibujo: ' + (cfg.direct ? 'directo' : 'iframe') + '  (N cambia, luego F5)');
     row('Modo bloques: ' + (S.on ? 'ENCENDIDO' : 'apagado') + '  [tecla ' + cfg.key.replace('Key', '') + ']');
-    { const cm = (() => { try { return camNow(); } catch (e) { return null; } })(); row('Ojo: ' + (cm ? cm.eye.map((v) => v.toFixed(1)).join(', ') : '?') + '   mirando: ' + (cm ? cm.dir.map((v) => v.toFixed(2)).join(', ') : '?')); }
-    row('Ultimo intento de poner: ' + (S.why || 'ninguno'));
-    row('Camara: ' + (S.camMode === 'del juego' ? 'DEL JUEGO (' + S.camSrc + ')' : 'no encontrada -> estimada') + '   FPS overlay: ' + S.fps);
-    row('Motor: contextos ' + JSON.stringify(EV.ctx) + ', offscreen ' + EV.off + ', workers ' + EV.workers + ', WebGPU pedido ' + EV.gpuReq + ', escrituras GPU ' + EV.wb + ', frame principal: ' + EV.top + ', ' + EV.where);
-    row('Bloques tapados por paredes (O): ' + (IG.on ? 'SI' : 'NO') + ', dibujos dentro del juego: ' + IG.n + (IG.err ? ', error: ' + IG.err : ''));
-    row('Borrados de profundidad por cuadro: ' + S.nPrev + ', dibujos por tramo: [' + S.segPrev.map((v) => v || 0).join(', ') + '], tramo del arma: ' + vmStart() + (S.vmSeg ? ' (manual)' : ' (auto)') + '   (teclas - y =)');
-    row('Llamadas: ' + Object.keys(EV.calls).map((k) => k + ' ' + EV.calls[k]).join(', '));
-    row('Datos: uniforms ' + MN.nUm + ', subidas ' + MN.nUbo + ', proyecciones ' + MN.nP + ', vistas ' + MN.nR + ', WebGL2: ' + (window.WebGL2RenderingContext ? 'si' : 'no'));
     row('Bloques puestos: ' + world.size + '   tamano de bloque: ' + cfg.scale + '   ojos: ' + cfg.eyeH + ' bloques');
-    row('Matrices que manda el juego: ' + names);
-    row('Proyeccion hallada: ' + (MN.P ? 'fov ~' + Math.round(2 * Math.atan(1 / MN.P[5]) * 180 / Math.PI) + ' grados' : 'no') + '   Candidatas de vista (C para probar la siguiente): ' + MN.cands.length + ' (usando la ' + (MN.cands.length ? MN.pick % MN.cands.length + 1 : 0) + ')   Nombradas VP: ' + JSON.stringify(MU.names));
-    if (MU.cands.length) { row('Camaras candidatas (C cambia, Shift+C automatica): usando la ' + ((MU.curIdx || 0) + 1) + ' de ' + MU.cands.length + (MU.role !== null ? ' (manual)' : ' (auto)')); MU.cands.slice(0, 6).forEach((e, i) => { const ey = eyeOf(e), r1 = Math.hypot(e.m[1], e.m[5], e.m[9]); row('  ' + (i + 1) + ') ' + (i === MU.curIdx ? '>> ' : '') + 'gira ' + (MU.rs[sigOf(e)] || 0).toFixed(2) + ', fov ' + Math.round(2 * Math.atan(1 / r1) * 180 / Math.PI) + ', ojo ' + ey.map((v) => v.toFixed(1)).join(',') + ', tramo ' + e.t + ', usos ' + e.n + (e.fit ? ', con proyeccion' : '')); }); }
-    (MU.cands.length ? [] : MN.cands).slice(0, 4).forEach((e, i) => row('  ' + (i + 1) + (e.vp ? ') VP usos ' + e.n + ', mira ' + [-e.m[3], -e.m[7], -e.m[11]].map((v) => v.toFixed(2)).join(', ') : ') usos ' + e.n + ', quieta ' + e.age + ', pos ') + [e.m[12], e.m[13], e.m[14]].map((v) => v.toFixed(1)).join(', ')));
     const mkBtn = (txt, fn) => { const b = mkEl('button', 'margin:3px 4px 0 0;padding:3px 8px;background:#333;color:#fff;border:1px solid #777;border-radius:4px;cursor:pointer', txt); b.onclick = (e) => { e.stopPropagation(); fn(); }; panel.appendChild(b); };
     mkBtn('Bloque -', () => { cfg.scale = Math.max(0.05, +(cfg.scale / 1.25).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; updPanel(); });
     mkBtn('Bloque +', () => { cfg.scale = Math.min(50, +(cfg.scale * 1.25).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; updPanel(); });
-    mkBtn('Copiar datos de diagnostico', () => {
-      const t = dumpData();
-      try { navigator.clipboard.writeText(t).then(() => toast('Datos copiados: pegalos en el chat'), () => prompt('Copia esto:', t)); } catch (e) { prompt('Copia esto:', t); }
-    });
     mkBtn('Restablecer todo (como al instalar)', () => {
       try { Object.keys(localStorage).filter((k) => k.indexOf('vs_') === 0).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
       toast('Listo: ajustes borrados. Recargando...'); setTimeout(() => location.reload(), 600);
@@ -890,7 +869,7 @@
     const sel = mkEl('select', 'display:block;margin-top:6px;width:100%;background:#222;color:#fff;border:1px solid #777'); ASSETS.skins.forEach((s, i) => { const o = mkEl('option', '', s[0]); o.value = i; if (i === cfg.skin) o.selected = true; sel.appendChild(o); });
     sel.onchange = () => setSkin(+sel.value); sel.onclick = (e) => e.stopPropagation(); panel.appendChild(mkEl('div', 'margin-top:6px', 'Skin de Steve (mano):')); panel.appendChild(sel);
     mkBtn('Usar esta skin en los jugadores', () => { try { localStorage.setItem('tex6_img_jugadores', 'data:image/png;base64,' + ASSETS.skins[cfg.skin][1]); } catch (e) {} row('Listo: recarga la pagina (necesita el script de texturas).'); });
-    panel.appendChild(mkEl('div', 'margin-top:8px;color:#aaa', '0: armas. Clic izq mantenido: minar. Clic der: poner. 1-9 o rueda: bloque (1 = mano). [ y ]: tamano de bloque. RePag/AvPag: altura del suelo. Solo tus bloques; el mapa no cambia.'));
+    panel.appendChild(mkEl('div', 'margin-top:8px;color:#aaa', 'I: inventario. 0: armas. Clic izq mantenido: minar. Clic der: poner. 1-9 o rueda: bloque (1 = mano). [ y ]: tamano de bloque. RePag/AvPag: altura del suelo. Solo tus bloques; el mapa no cambia.'));
   }
 
   // skin de Steve para los jugadores: se guarda para el script de texturas (solo si no tenias una imagen para "jugadores")
@@ -898,7 +877,6 @@
     if (ASSETS && !ls.get('tex6_img_jugadores') && ls.get('vs_players') !== '0') { ls.set('tex6_img_jugadores', 'data:image/png;base64,' + ASSETS.skins[0][1]); ls.set('vs_players', '1'); }
   } catch (e) {}
 
-  DBG();
   if (ls.get('vs_on') !== '0' && !window.__vsNoAuto) { const go = () => setBuild(true, true); if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go(); }
   // aviso en pantalla: confirma que el script cargo (o muestra el error)
   const toast = (txt, bad) => {
