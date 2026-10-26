@@ -3,7 +3,7 @@
 // @namespace    local
 // @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
 // @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
-// @version      3.1
+// @version      3.2
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,7 +27,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const VERSION = '3.1';
+  const VERSION = '3.2';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
@@ -94,7 +94,7 @@
   const vid = (o) => { if (!o) return 0; let i = VMS.ids.get(o); if (!i) { i = ++VMS.n; try { VMS.ids.set(o, i); } catch (e) {} } return i; };
   const MN = { vp: new Map(), VPc: null, vpf: -9, cands: [], pick: 0, hist: new Map(), seq: 0, evP: [], evR: [], P: null, V: null, pf: -9, vf: -9, nUm: 0, nUbo: 0, nP: 0, nR: 0, ctx2: false };
   const transp = (m) => { const o = new Float32Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c]; return o; };
-  const MU = { rs: [], pdir: [], mv: 0, role: null, pl: [], lastEye: null, vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
+  const MU = { rs: {}, pdir: {}, stick: null, mv: 0, role: null, pl: [], lastEye: null, vp: new Map(), cands: [], chosen: null, f: -9, names: {} };
   const reUVP = /unity_MatrixVP|_MatrixVP|ViewProj|viewProj|u_?VP\b|uVP\b/i;
   const nameFeed = (n, v) => {
     if (!n || !v || v.length < 16) return;
@@ -126,11 +126,14 @@
   const vpScore = (e) => { const b = vpScore0(e); return b + (vpFit(e) ? 0 : 500); };
   const vpScore0 = (e) => { const ey = eyeOf(e); return MU.lastEye ? Math.hypot(ey[0] - MU.lastEye[0], ey[1] - MU.lastEye[1], ey[2] - MU.lastEye[2]) : (ey[1] > 0.3 && ey[1] < 4 ? 0 : 100) + (Math.hypot(ey[0], ey[1], ey[2]) < 0.05 ? 1000 : 0); };
   const dirOf = (e) => e.dir || (e.dir = ((camFromVP(e.m) || {}).dir) || [0, 0, 0]);
+  const sigOf = (e) => e.sig || (e.sig = (e.t || 0) + '|' + Math.round(Math.hypot(e.m[1], e.m[5], e.m[9]) * 40));
   const pickVP = (arr) => {
     if (!arr.length) return null;
-    if (MU.role === null) {                                                          // la camara del mundo es la que gira cuando mueves el mouse (la del arma no)
-      let bi = -1, bv = 0.02; MU.rs.forEach((v, i) => { if (v > bv && i < arr.length) { bv = v; bi = i; } });
-      if (bi >= 0) return arr[bi];
+    if (MU.role === null) {                                                          // la camara del mundo es la que gira cuando mueves el mouse (la del arma no); se reconoce por su firma (tramo + fov), no por el orden de subida
+      let bs = null, bv = 0.02; const cs = MU.stick && MU.rs[MU.stick] > 0.02 ? MU.rs[MU.stick] : 0;
+      for (const k in MU.rs) { const v = MU.rs[k]; if (v > bv && arr.some((e) => sigOf(e) === k)) { bv = v; bs = k; } }
+      if (bs !== null && MU.stick && bs !== MU.stick && cs > 0 && bv < cs * 1.6 && arr.some((e) => sigOf(e) === MU.stick)) bs = MU.stick;     // histeresis: no saltar de camara por un golpe del juego
+      if (bs !== null) { MU.stick = bs; let be = null, sc = 1e18; for (const e of arr) if (sigOf(e) === bs) { const c = vpScore0(e); if (c < sc) { sc = c; be = e; } } if (be) return be; }
     }
     if (MU.role !== null) return arr[MU.role % arr.length];                       // el jugador eligio con C: se respeta el orden de subida
     let best = null, bs = 1e18; for (const e of arr) { const sc = vpScore(e); if (sc < bs) { bs = sc; best = e; } } return best;
@@ -139,7 +142,8 @@
     if (VMS.cur.length) { VMS.list = VMS.cur; VMS.cur = []; VMS.curSet = new Set(); }
     { const arr = []; MU.vp.forEach((e) => arr.push(e));
       MU.act = (MU.act || 0) * 0.8 + MU.mv; MU.mv = 0; const mv = MU.act;                // el giro aparece uno o dos cuadros despues del movimiento del mouse
-      arr.forEach((e, i) => { const d = dirOf(e), p = MU.pdir[i]; if (p && mv > 0) MU.rs[i] = (MU.rs[i] || 0) * 0.97 + Math.hypot(d[0] - p[0], d[1] - p[1], d[2] - p[2]); MU.pdir[i] = d; });
+      { const seen = {}; arr.forEach((e) => { const k = sigOf(e), pe = MU.pdir[k], c = pe ? Math.hypot(...eyeOf(e).map((v, j) => v - pe.eye[j])) : 0; if (!seen[k] || c < seen[k].c) seen[k] = { e, c }; });
+        for (const k in seen) { const e = seen[k].e, d = dirOf(e), p = MU.pdir[k]; if (p && mv > 0) MU.rs[k] = (MU.rs[k] || 0) * 0.97 + Math.hypot(d[0] - p.d[0], d[1] - p.d[1], d[2] - p.d[2]); MU.pdir[k] = { d, eye: eyeOf(e) }; } }
       arr.forEach((e) => { e.sc = vpScore(e); });
       if (arr.length) { MU.cands = arr.slice(0, 12); const e = pickVP(arr); MU.chosen = e.m; MU.f = S.frame; MU.lastEye = eyeOf(e); MU.cur = e; MU.curIdx = arr.indexOf(e); }
       MU.vp.clear(); MU.pl = []; }
@@ -869,7 +873,7 @@
     row('Bloques puestos: ' + world.size + '   tamano de bloque: ' + cfg.scale + '   ojos: ' + cfg.eyeH + ' bloques');
     row('Matrices que manda el juego: ' + names);
     row('Proyeccion hallada: ' + (MN.P ? 'fov ~' + Math.round(2 * Math.atan(1 / MN.P[5]) * 180 / Math.PI) + ' grados' : 'no') + '   Candidatas de vista (C para probar la siguiente): ' + MN.cands.length + ' (usando la ' + (MN.cands.length ? MN.pick % MN.cands.length + 1 : 0) + ')   Nombradas VP: ' + JSON.stringify(MU.names));
-    if (MU.cands.length) { row('Camaras candidatas (C cambia, Shift+C automatica): usando la ' + ((MU.curIdx || 0) + 1) + ' de ' + MU.cands.length + (MU.role !== null ? ' (manual)' : ' (auto)')); MU.cands.slice(0, 6).forEach((e, i) => { const ey = eyeOf(e), r1 = Math.hypot(e.m[1], e.m[5], e.m[9]); row('  ' + (i + 1) + ') ' + (i === MU.curIdx ? '>> ' : '') + 'gira ' + (MU.rs[i] || 0).toFixed(2) + ', fov ' + Math.round(2 * Math.atan(1 / r1) * 180 / Math.PI) + ', ojo ' + ey.map((v) => v.toFixed(1)).join(',') + ', tramo ' + e.t + ', usos ' + e.n + (e.fit ? ', con proyeccion' : '')); }); }
+    if (MU.cands.length) { row('Camaras candidatas (C cambia, Shift+C automatica): usando la ' + ((MU.curIdx || 0) + 1) + ' de ' + MU.cands.length + (MU.role !== null ? ' (manual)' : ' (auto)')); MU.cands.slice(0, 6).forEach((e, i) => { const ey = eyeOf(e), r1 = Math.hypot(e.m[1], e.m[5], e.m[9]); row('  ' + (i + 1) + ') ' + (i === MU.curIdx ? '>> ' : '') + 'gira ' + (MU.rs[sigOf(e)] || 0).toFixed(2) + ', fov ' + Math.round(2 * Math.atan(1 / r1) * 180 / Math.PI) + ', ojo ' + ey.map((v) => v.toFixed(1)).join(',') + ', tramo ' + e.t + ', usos ' + e.n + (e.fit ? ', con proyeccion' : '')); }); }
     (MU.cands.length ? [] : MN.cands).slice(0, 4).forEach((e, i) => row('  ' + (i + 1) + (e.vp ? ') VP usos ' + e.n + ', mira ' + [-e.m[3], -e.m[7], -e.m[11]].map((v) => v.toFixed(2)).join(', ') : ') usos ' + e.n + ', quieta ' + e.age + ', pos ') + [e.m[12], e.m[13], e.m[14]].map((v) => v.toFixed(1)).join(', ')));
     const mkBtn = (txt, fn) => { const b = mkEl('button', 'margin:3px 4px 0 0;padding:3px 8px;background:#333;color:#fff;border:1px solid #777;border-radius:4px;cursor:pointer', txt); b.onclick = (e) => { e.stopPropagation(); fn(); }; panel.appendChild(b); };
     mkBtn('Bloque -', () => { cfg.scale = Math.max(0.05, +(cfg.scale / 1.25).toFixed(3)); ls.set('vs_scale', String(cfg.scale)); meshDirty = true; updPanel(); });
