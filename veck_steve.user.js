@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Steve y bloques (Veck.io)
 // @namespace    local
-// @version      2.5
+// @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
+// @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
+// @version      2.6
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -25,6 +27,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
+  const VERSION = '2.6';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
@@ -794,7 +797,7 @@
     const names = Object.keys(S.names).sort((a, b) => S.names[b] - S.names[a]).slice(0, 8).map((n) => n + ' x' + S.names[n]).join(', ') || 'ninguno';
     panel.textContent = '';
     const row = (t) => { panel.appendChild(mkEl('div', 'margin:2px 0', t)); };
-    panel.appendChild(mkEl('div', 'font-weight:700;margin-bottom:4px', 'Steve y bloques  (tecla U cierra)'));
+    panel.appendChild(mkEl('div', 'font-weight:700;margin-bottom:4px', 'Steve y bloques v' + VERSION + '  (tecla U cierra)'));
     row('Dibujo: ' + (cfg.direct ? 'directo' : 'iframe') + '  (N cambia, luego F5)');
     row('Modo bloques: ' + (S.on ? 'ENCENDIDO' : 'apagado') + '  [tecla ' + cfg.key.replace('Key', '') + ']');
     { const cm = (() => { try { return camNow(); } catch (e) { return null; } })(); row('Ojo: ' + (cm ? cm.eye.map((v) => v.toFixed(1)).join(', ') : '?') + '   mirando: ' + (cm ? cm.dir.map((v) => v.toFixed(2)).join(', ') : '?')); }
