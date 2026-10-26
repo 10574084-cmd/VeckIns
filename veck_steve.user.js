@@ -3,7 +3,7 @@
 // @namespace    local
 // @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
 // @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
-// @version      2.8
+// @version      2.9
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,7 +27,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const VERSION = '2.8';
+  const VERSION = '2.9';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
@@ -819,6 +819,10 @@
     mkBtn('Copiar datos de diagnostico', () => {
       const t = dumpData();
       try { navigator.clipboard.writeText(t).then(() => toast('Datos copiados: pegalos en el chat'), () => prompt('Copia esto:', t)); } catch (e) { prompt('Copia esto:', t); }
+    });
+    mkBtn('Restablecer todo (como al instalar)', () => {
+      try { Object.keys(localStorage).filter((k) => k.indexOf('vs_') === 0).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
+      toast('Listo: ajustes borrados. Recargando...'); setTimeout(() => location.reload(), 600);
     });
     mkBtn('Borrar mis bloques', () => { world.clear(); meshDirty = true; resetGround(); updPanel(); });
     const sel = mkEl('select', 'display:block;margin-top:6px;width:100%;background:#222;color:#fff;border:1px solid #777'); ASSETS.skins.forEach((s, i) => { const o = mkEl('option', '', s[0]); o.value = i; if (i === cfg.skin) o.selected = true; sel.appendChild(o); });
