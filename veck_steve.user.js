@@ -3,7 +3,7 @@
 // @namespace    local
 // @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
 // @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
-// @version      2.9
+// @version      3.0
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,7 +27,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const VERSION = '2.9';
+  const VERSION = '3.0';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
@@ -299,6 +299,9 @@
   const K = {};
   const mouse = { dx: 0, dy: 0 };
   let mcw = false, wSel = 0;                                                  // mcw: barra de armas de Minecraft (0 cambia: bloques -> armas MC -> armas Veck.io -> bloques)
+  const loadHot = (k, d) => { try { const a = JSON.parse(localStorage.getItem(k) || 'null'); if (Array.isArray(a) && a.length === 9) return a.map(Number); } catch (e) {} return d; };
+  let hotB = loadHot('vs_hotB', [0, 1, 2, 3, 4, 5, 6, 7, 8]), hotW = loadHot('vs_hotW', [0, 1, 2, 3, 4, 5, 6, 7, 8]);   // que bloque / arma hay en cada casilla de la barra
+  const saveHot = () => { try { localStorage.setItem('vs_hotB', JSON.stringify(hotB)); localStorage.setItem('vs_hotW', JSON.stringify(hotW)); } catch (e) {} };
   let selSlot = 0, lmb = false, swing = -1, swingT = 0;
   const lockOn = () => !!document.pointerLockElement;
   window.addEventListener('keydown', (e) => {
@@ -316,6 +319,8 @@
     else if (S.on && e.code === 'PageUp') { cfg.eyeH = +(cfg.eyeH + 0.1).toFixed(2); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && e.code === 'PageDown') { cfg.eyeH = Math.max(0.3, +(cfg.eyeH - 0.1).toFixed(2)); ls.set('vs_eye', String(cfg.eyeH)); GR.frame = -1; updPanel(); }
     else if (S.on && lockOn() && e.code === 'KeyO') { IG.on = !IG.on; ls.set('vs_ig', IG.on ? '1' : '0'); toast(IG.on ? 'Bloques tapados por las paredes: SI' : 'Bloques tapados por las paredes: NO (se dibujan encima de todo)'); e.stopImmediatePropagation(); e.preventDefault(); }
+    else if (S.on && e.code === 'KeyI' && !e.ctrlKey && !e.altKey && !e.metaKey) { toggleInv(); e.preventDefault(); e.stopImmediatePropagation(); }
+    else if (inv && e.code === 'Escape') { toggleInv(); }
     else if (S.on && lockOn() && (e.code === 'Minus' || e.code === 'Equal')) {
       const N = Math.max(1, S.nPrev), cur = S.vmSeg || vmStart();
       S.vmSeg = e.code === 'Equal' ? (cur >= N ? 0 : cur + 1) : (S.vmSeg === 0 ? Math.max(1, vmStart() - 1) : cur <= 1 ? 0 : cur - 1);
@@ -471,7 +476,7 @@
   let cur = { hit: null, key: '', prog: 0 };
   function placeBlock() {
     if (VMS.w || mcw) { S.why = 'estas en armas (pulsa 0 hasta volver a los bloques)'; return; }
-    if (selSlot === 0) { S.why = 'tienes la mano vacia (slot 1): pulsa 2-9 para elegir un bloque'; return; }
+    if (!hotB[selSlot]) { S.why = 'tienes la mano vacia: elige un bloque en tu barra (o abre el inventario con I)'; return; }
     if (!S.ready) { S.why = 'aun no cargo el dibujo'; return; }
     const cam = camNow(); if (!cam) { S.why = 'no hay camara'; return; }
     const c = placeTarget(cam); if (!c) { S.why = 'no hay suelo a tu alcance (mira un poco mas hacia abajo; el suelo se mide con tus pies quietos)'; return; }
@@ -479,7 +484,7 @@
     const sz = cfg.scale, cx = (c[0] + 0.5) * sz, cy = (c[1] + 0.5) * sz, cz = (c[2] + 0.5) * sz;
     if (Math.hypot(cx - cam.eye[0], cz - cam.eye[2]) < 0.8 * sz && Math.abs(cy - cam.eye[1]) < 1.2 * sz) return;       // no dentro de ti
     const k = keyOf(c[0], c[1], c[2]); if (world.has(k)) return;
-    world.set(k, selSlot); meshDirty = true;
+    world.set(k, hotB[selSlot]); meshDirty = true;
   }
   const debris = [];
   const mineStep = (cam, dt) => {
@@ -708,7 +713,7 @@
     gl.useProgram(PR); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (cam && !VMS.w && !mcw && selSlot > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
+    if (cam && !VMS.w && !mcw && hotB[selSlot] > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
       if (worldCnt && !(IG.on && S.frame - IG.ok < 4)) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
@@ -720,12 +725,12 @@
     const asp = S.ov.width / S.ov.height, Ph = M.persp(70 * Math.PI / 180, asp, 0.05, 10);
     gl.useProgram(PR); gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
     if (mcw) {
-      const ib = itemBuf(wSel); gl.bindTexture(gl.TEXTURE_2D, itemTex); gl.bindBuffer(gl.ARRAY_BUFFER, ib.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, itemHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, ib.n);
-    } else if (VMS.w || selSlot === 0) {
+      const ib = itemBuf(hotW[wSel]); gl.bindTexture(gl.TEXTURE_2D, itemTex); gl.bindBuffer(gl.ARRAY_BUFFER, ib.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, itemHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, ib.n);
+    } else if (VMS.w || !hotB[selSlot]) {
       if (!armBuf) { armBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); gl.bufferData(gl.ARRAY_BUFFER, armVerts(), gl.STATIC_DRAW); }
       gl.bindTexture(gl.TEXTURE_2D, skinTex); gl.bindBuffer(gl.ARRAY_BUFFER, armBuf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, VMS.w ? gunArmMatrix() : handMatrix())); gl.drawArrays(gl.TRIANGLES, 0, 36);
     } else {
-      const cb = cubeBuf(selSlot); gl.bindTexture(gl.TEXTURE_2D, atlasTex); gl.bindBuffer(gl.ARRAY_BUFFER, cb.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, blockHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, cb.n);
+      const cb = cubeBuf(hotB[selSlot]); gl.bindTexture(gl.TEXTURE_2D, atlasTex); gl.bindBuffer(gl.ARRAY_BUFFER, cb.buf); bindAttribs(gl, 32); setMVP(gl, PR, M.mul(Ph, blockHandMatrix())); gl.drawArrays(gl.TRIANGLES, 0, cb.n);
     }
   }
   // etapas de rotura encima del bloque que minas (mezcla como en el juego: destino*origen*2)
@@ -773,14 +778,64 @@
     hud.textContent = '';
     for (let i = 0; i < 9; i++) {
       const s = mkEl('div', 'width:40px;height:40px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(139,139,139,.55);border:3px solid ' + (i === (mcw ? wSel : selSlot) ? '#fff' : '#555'));
-      if (mcw) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = 'data:image/png;base64,' + ASSETS.items[i][1]; s.appendChild(im); }
-      else if (i > 0 && BLK[i]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[i]; s.appendChild(im); }
-      else if (i === 0) s.appendChild(mkEl('div', 'font-size:20px;line-height:1', '✋'));
+      if (mcw) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = 'data:image/png;base64,' + ASSETS.items[hotW[i]][1]; s.appendChild(im); }
+      else if (hotB[i] > 0 && BLK[hotB[i]]) { const im = mkEl('img', 'width:30px;height:30px;image-rendering:pixelated'); im.src = hotIcons[hotB[i]]; s.appendChild(im); }
+      else s.appendChild(mkEl('div', 'font-size:20px;line-height:1', '✋'));
       s.appendChild(mkEl('div', 'position:absolute;left:2px;top:0;font-size:9px;color:#ddd;text-shadow:1px 1px #000', String(i + 1)));
       hud.appendChild(s);
     }
-    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', mcw ? ASSETS.items[wSel][0] : selSlot ? BLK[selSlot].n : 'Mano');
+    const nm = mkEl('div', 'position:absolute;left:0;right:0;top:-18px;text-align:center;text-shadow:1px 1px #000;white-space:nowrap', mcw ? ASSETS.items[hotW[wSel]][0] : hotB[selSlot] ? BLK[hotB[selSlot]].n : 'Mano');
     hud.appendChild(nm);
+  }
+  // ---- pantalla de inventario (tecla I): elige que va en cada casilla de la barra
+  let inv = null, invTab = 0, invSlot = 1;
+  function toggleInv() {
+    if (inv) { inv.remove(); inv = null; return; }
+    if (!document.body || !S.ready) { toast('Espera a que cargue el modo bloques'); return; }
+    invTab = mcw ? 1 : VMS.w ? 2 : 0; invSlot = invTab === 1 ? wSel : selSlot;
+    try { document.exitPointerLock && document.exitPointerLock(); } catch (e) {}
+    inv = mkEl('div', 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,94vw);box-sizing:border-box;background:#c6c6c6;border:4px solid #373737;border-radius:3px;padding:12px;z-index:2147483004;color:#222;font:13px system-ui,sans-serif;box-shadow:0 8px 40px rgba(0,0,0,.6);pointer-events:auto');
+    inv.id = 'vs-ui'; document.body.appendChild(inv); renderInv();
+  }
+  function renderInv() {
+    if (!inv) return; inv.textContent = '';
+    const cell = (sel) => 'width:46px;height:46px;box-sizing:border-box;background:#8b8b8b;border:3px solid ' + (sel ? '#fff' : '#555') + ';display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;flex:none';
+    const img = (src) => { const im = mkEl('img', 'width:34px;height:34px;image-rendering:pixelated;pointer-events:none'); im.src = src; return im; };
+    const head = mkEl('div', 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'); head.appendChild(mkEl('b', 'font-size:15px', 'Inventario'));
+    const x = mkEl('button', 'cursor:pointer', 'Cerrar (I)'); x.onclick = toggleInv; head.appendChild(x); inv.appendChild(head);
+    const tabs = mkEl('div', 'display:flex;gap:4px;margin-bottom:8px');
+    ['Bloques', 'Armas de Minecraft', 'Armas de Veck.io'].forEach((n, i) => {
+      const b = mkEl('button', 'flex:1;padding:6px;cursor:pointer;font-weight:' + (i === invTab ? '700' : '400') + ';background:' + (i === invTab ? '#fff' : '#ddd') + ';border:2px solid #555', n);
+      b.onclick = () => { invTab = i; mcw = i === 1; VMS.w = i === 2; VMS.probe = null; if (i === 1) { wSel = invSlot; } else if (i === 0) { selSlot = invSlot; } refreshHud(); renderInv(); }; tabs.appendChild(b);
+    }); inv.appendChild(tabs);
+    const grid = mkEl('div', 'display:flex;flex-wrap:wrap;gap:4px;min-height:52px;margin-bottom:10px');
+    if (invTab === 0) {
+      for (let id = 0; id < BLK.length; id++) {
+        const c = mkEl('div', cell(false)); c.title = id ? BLK[id].n : 'Mano vacia';
+        if (id) c.appendChild(img(hotIcons[id])); else c.appendChild(mkEl('div', 'font-size:22px', '\u270B'));
+        c.onclick = () => { hotB[invSlot] = id; selSlot = invSlot; mcw = false; VMS.w = false; saveHot(); refreshHud(); renderInv(); }; grid.appendChild(c);
+      }
+    } else if (invTab === 1) {
+      ASSETS.items.forEach((it, i) => {
+        const c = mkEl('div', cell(false)); c.title = it[0]; c.appendChild(img('data:image/png;base64,' + it[1]));
+        c.onclick = () => { hotW[invSlot] = i; wSel = invSlot; mcw = true; VMS.w = false; saveHot(); refreshHud(); renderInv(); }; grid.appendChild(c);
+      });
+    } else {
+      grid.appendChild(mkEl('div', 'padding:4px 2px;line-height:1.5', 'Estas son las armas reales de Veck.io: se ven en la mano de Steve y las eliges con los controles del propio juego (numeros, rueda, clic). Para esconder la mano del juego usa , . / (\\ deshace). Con la tecla 0 vuelves a los bloques.'));
+    }
+    inv.appendChild(grid);
+    if (invTab < 2) {
+      inv.appendChild(mkEl('div', 'margin-bottom:4px', 'Tu barra (clic en una casilla y luego en un objeto de arriba):'));
+      const bar = mkEl('div', 'display:flex;gap:4px;flex-wrap:wrap');
+      for (let i = 0; i < 9; i++) {
+        const c = mkEl('div', cell(i === invSlot));
+        if (invTab === 1) c.appendChild(img('data:image/png;base64,' + ASSETS.items[hotW[i]][1])); else if (hotB[i] > 0) c.appendChild(img(hotIcons[hotB[i]])); else c.appendChild(mkEl('div', 'font-size:22px', '\u270B'));
+        c.appendChild(mkEl('div', 'position:absolute;left:2px;top:0;font-size:9px;color:#eee;text-shadow:1px 1px #000', String(i + 1)));
+        c.onclick = () => { invSlot = i; if (invTab === 1) wSel = i; else selSlot = i; refreshHud(); renderInv(); }; bar.appendChild(c);
+      }
+      inv.appendChild(bar);
+      const rs = mkEl('button', 'margin-top:10px;cursor:pointer', 'Restablecer barra'); rs.onclick = () => { if (invTab === 1) hotW = [0, 1, 2, 3, 4, 5, 6, 7, 8]; else hotB = [0, 1, 2, 3, 4, 5, 6, 7, 8]; saveHot(); refreshHud(); renderInv(); }; inv.appendChild(rs);
+    }
   }
   function setBuild(v, noSave) {
     S.on = v; if (!noSave) ls.set('vs_on', v ? '1' : '0'); if (v && !S.gl) initGL(); refreshHud(); updPanel();
