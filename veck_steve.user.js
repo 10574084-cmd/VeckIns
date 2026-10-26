@@ -3,7 +3,7 @@
 // @namespace    local
 // @updateURL    https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
 // @downloadURL  https://raw.githubusercontent.com/10574084-cmd/VeckIns/main/veck_steve.user.js
-// @version      3.0
+// @version      3.1
 // @description  Modo bloques estilo Minecraft: mano de Steve en primera persona con balanceo, poner y minar bloques tuyos. Solo visual, solo lo ves tu: no cambia el mapa ni da ventaja.
 // @match        https://veck.io/*
 // @match        https://*.veck.io/*
@@ -27,7 +27,7 @@
     direct: ls.get('vs_direct') === '1',              // 1 = lienzo directo en vez de iframe
     reach: 5.5
   };
-  const VERSION = '3.0';
+  const VERSION = '3.1';
   const S = { dbg: {}, on: false, frame: 0, dc: 0, ov: null, gl: null, ready: false, camMode: 'nada', names: {}, fps: 0, seg: [], segPrev: [], nPrev: 0, vmSeg: 0 };
   window.__vsteve = { S, cfg };
   const dumpData = () => JSON.stringify({ SEG: { nPrev: S.nPrev, segPrev: S.segPrev.map((v) => v || 0), vmSeg: S.vmSeg, start: vmStart(), hand: [...VMS.hand], parts: VMS.list, w: VMS.w, mcw: mcw, on: S.on }, EV, counts: { um: MN.nUm, ubo: MN.nUbo, P: MN.nP, R: MN.nR }, MU: { names: MU.names, c: MU.cands.slice(0, 5).map((e) => ({ n: e.n, v: Array.from(e.m, (x) => +x.toFixed(3)) })) }, cands: MN.cands.slice(0, 5).map((e) => ({ n: e.n, vp: !!e.vp, v: Array.from(e.m, (x) => +x.toFixed(3)) })), SMP, cam: (() => { try { const c = camNow(); return { eye: c.eye, dir: c.dir, src: S.camSrc, mode: S.camMode }; } catch (e) { return null; } })() });
@@ -469,9 +469,11 @@
     if (hit) return [hit.cell[0] + hit.normal[0], hit.cell[1] + hit.normal[1], hit.cell[2] + hit.normal[2]];
     if (gyRef === null) return null;
     const gy = gyRef * sz, dy = cam.dir[1];
-    if (dy >= -0.005) return null;                                        // mirando al cielo / recto: no hay suelo
-    const t = (gy - cam.eye[1]) / dy; if (t < 0.05 * sz || t > reach * 2.4) return null;
-    return [Math.floor((cam.eye[0] + cam.dir[0] * t) / sz), gyRef, Math.floor((cam.eye[2] + cam.dir[2] * t) / sz)];
+    let t = dy < -0.005 ? (gy - cam.eye[1]) / dy : -1;
+    if (t > 0.05 * sz && t <= reach * 2.4) return [Math.floor((cam.eye[0] + cam.dir[0] * t) / sz), gyRef, Math.floor((cam.eye[2] + cam.dir[2] * t) / sz)];
+    // mirando recto o al cielo / suelo muy lejos: siempre hay un sitio sugerido, al nivel del suelo, a tu alcance
+    const hx = cam.dir[0], hz = cam.dir[2], hl = Math.hypot(hx, hz) || 1, d = reach * 0.8;
+    return [Math.floor((cam.eye[0] + hx / hl * d) / sz), gyRef, Math.floor((cam.eye[2] + hz / hl * d) / sz)];
   };
   let cur = { hit: null, key: '', prog: 0 };
   function placeBlock() {
@@ -713,7 +715,8 @@
     gl.useProgram(PR); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(UL(gl, PR, 'uTex'), 0); gl.uniform1f(UL(gl, PR, 'uAlpha'), 1);
-    if (cam && !VMS.w && !mcw && hotB[selSlot] > 0 && !cur.hit) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
+    if (cam && !VMS.w && !mcw && hotB[selSlot] > 0) { const pt = placeTarget(cam); if (pt && !world.has(keyOf(pt[0], pt[1], pt[2]))) drawOutline(gl, cam, pt, [1, 1, 1]); }
+    if (cam && world.size && IG.on && !IG.hint && IG.n === 0 && S.frame > 600) { IG.hint = 1; toast('Los bloques se ven por encima de las paredes: el arma del juego no esta en el tramo que usa el codigo. Prueba las teclas - y = (tramo) hasta que se tapen. Panel: U', true); }
     if (cam && world.size) {
       if (meshDirty) rebuildWorld();
       if (worldCnt && !(IG.on && S.frame - IG.ok < 4)) { gl.bindBuffer(gl.ARRAY_BUFFER, worldBuf); bindAttribs(gl, 32); setMVP(gl, PR, cam.VP); gl.drawArrays(gl.TRIANGLES, 0, worldCnt); }
